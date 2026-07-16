@@ -8,6 +8,28 @@ Format: `[vX.Y.Z] — YYYY-MM-DD`
 
 ---
 
+## [v3.4.3] — 2026-07-16
+
+### Added
+- **XYMA Analytics logo** embedded as base64 data URI in both files (no external dependency, works offline):
+  - `vessel-multi-zone V3.html` — logo displayed in the tab bar to the left of the version badge
+  - `Vessel thermal mapping configurator.html` — logo at the left edge of the launcher header bar
+
+### Changed
+- Launcher renamed from `launcher.html` → `Vessel thermal mapping configurator.html`
+
+---
+
+## [v3.4.2] — 2026-07-16
+
+### Fixed
+- **Launcher iframe not rendering app correctly** — right-side panel (3D view, tabs) was blank
+  - Added explicit `width:100%` and `height:calc(100vh - Npx)` to iframe CSS (fixed positioning alone doesn't stretch iframes like divs)
+  - `updateLayout()` now also sets `frame.style.height` dynamically when the update banner shows/hides
+  - `updateLayout()` called before `frame.src` is assigned so the app measures correct viewport on first render
+
+---
+
 ## [v3.4.1] — 2026-07-16
 
 ### Added
