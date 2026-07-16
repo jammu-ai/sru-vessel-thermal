@@ -8,6 +8,19 @@ Format: `[vX.Y.Z] — YYYY-MM-DD`
 
 ---
 
+## [v3.4.4] — 2026-07-16
+
+### Added
+- **`bootstrap.html`** — ultra-minimal (~35 lines of logic) file for OTA client distribution.
+  - Clients receive this file **once** and never need a new copy again
+  - On every open: fetches the latest `Vessel thermal mapping configurator.html` from GitHub, creates a Blob URL, and calls `location.replace()` to seamlessly replace itself with the full launcher
+  - The launcher then fetches the latest `vessel-multi-zone V3.html` as before
+  - Push any update to GitHub → all clients see it on their next open, zero redistribution
+  - Shows XYMA logo + spinner while loading; error state + Retry button if GitHub is unreachable
+  - The only hardcoded value is the raw GitHub URL for the launcher (effectively never changes)
+
+---
+
 ## [v3.4.3] — 2026-07-16
 
 ### Added
