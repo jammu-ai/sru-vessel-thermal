@@ -8,6 +8,21 @@ Format: `[vX.Y.Z] — YYYY-MM-DD`
 
 ---
 
+## [v3.4.1] — 2026-07-16
+
+### Added
+- **`launcher.html`** — standalone wrapper page that always fetches and runs the latest version of the app from GitHub.
+  - Fetches `vessel-multi-zone V3.html` from `raw.githubusercontent.com` on every open (cache-busted)
+  - Parallel GitHub API call to show the last commit date in the header bar
+  - Mounts fetched HTML into a full-screen `<iframe>` via Blob URL — app runs in its own context
+  - Slim header bar: live version badge, last-updated date, Reload button
+  - "Updated v3.x → v3.y" dismissable green banner when a new version is detected (compared via `localStorage`)
+  - Loading spinner while fetching; friendly error state if GitHub is unreachable
+  - Offline fallback: caches last-fetched HTML in `localStorage`; "Open cached vX.Y.Z" button on error
+  - Repo made public so no auth token is required in the page source
+
+---
+
 ## [v3.4.0] — 2026-07-16
 
 ### Added
