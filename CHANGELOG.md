@@ -8,6 +8,18 @@ Format: `[vX.Y.Z] — YYYY-MM-DD`
 
 ---
 
+## [v3.5.0] — 2026-07-16
+
+### Added
+- **JSON Config Import / Export** — save and reload complete vessel configurations as `.json` files.
+  - **⬆ Export Config** button downloads a `vessel-config-YYYY-MM-DD.json` file containing: vessel dimensions, unit system, all zone definitions, thermal generator settings, spec fields, and the current thermal data grid (full snapshot).
+  - **⬇ Import** button opens a file picker; loads any exported config and restores all state instantly — including thermal data so the view looks exactly as it was saved.
+  - Buttons appear in the Presets section below the three preset buttons (separated by a divider).
+  - **Backwards compatible schema** (`schemaVersion: "1"`): every field is optional on import — missing fields fall back to the app's current defaults. Old config files will always be accepted as new fields are added in future versions.
+  - Zone `id` values are reassigned on import (runtime-only); thermal data is keyed by zone array index so it survives the reassignment.
+
+---
+
 ## [v3.4.5] — 2026-07-16
 
 ### Fixed
