@@ -8,6 +8,15 @@ Format: `[vX.Y.Z] — YYYY-MM-DD`
 
 ---
 
+## [v3.4.5] — 2026-07-16
+
+### Fixed
+- **`bootstrap.html` stuck at "Loading…"** — replaced `location.replace(URL.createObjectURL(blob))` with `document.open(); document.write(html); document.close()`.
+  - Root cause: `location.replace(blob_url)` changes the page origin to `blob:null`; Chrome blocks `fetch()` from `blob:null` to external HTTPS even with `Access-Control-Allow-Origin: *`, so the launcher's own GitHub fetch silently failed.
+  - Fix keeps the `file://` origin intact so the launcher's scripts execute normally and can fetch from `raw.githubusercontent.com`.
+
+---
+
 ## [v3.4.4] — 2026-07-16
 
 ### Added
