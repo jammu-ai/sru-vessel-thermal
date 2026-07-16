@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vessel Thermal Mapping Dashboard v3.4.0</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body,#root{width:100%;height:100%;overflow:hidden}
+body{font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif;background:#f6f8fa;color:#1f2328;font-size:13px}
+input[type="range"]{width:100%;height:5px;-webkit-appearance:none;appearance:none;background:#d0d7de;border-radius:3px;outline:none;cursor:pointer}
+input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--accent,#0969da);cursor:pointer;border:2px solid #f6f8fa;box-shadow:0 1px 6px rgba(0,0,0,.2)}
+input[type="range"]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--accent,#0969da);cursor:pointer;border:2px solid #f6f8fa}
+input[type="number"]{background:#ffffff;border:1px solid #afb8c1;color:#1f2328;border-radius:5px;padding:4px 8px;font-family:'IBM Plex Mono',monospace;font-size:12px;width:68px;outline:none}
+input[type="number"]:focus{border-color:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.1)}
+select{background:#ffffff;border:1px solid #afb8c1;color:#1f2328;border-radius:5px;padding:5px 8px;font-size:12px;font-family:'IBM Plex Sans',sans-serif;outline:none;cursor:pointer}
+select:focus{border-color:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.1)}
+::-webkit-scrollbar{width:7px}::-webkit-scrollbar-track{background:#f6f8fa}::-webkit-scrollbar-thumb{background:#d0d7de;border-radius:4px}::-webkit-scrollbar-thumb:hover{background:#afb8c1}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script type="text/babel">
+const{useState,useRef,useEffect,useMemo,useCallback}=React;
+const e=React.createElement;
+
+/* ═══ ZONE PALETTE ═══ */
+const ZONE_COLORS=[
+  {hex:"#f0883e",rgb:[240,136,62],three:0xf0883e},
+  {hex:"#0969da",rgb:[9,105,218],three:0x0969da},
+  {hex:"#3fb950",rgb:[63,185,80],three:0x3fb950},
+  {hex:"#bc8cff",rgb:[188,140,255],three:0xbc8cff},
+  {hex:"#f778ba",rgb:[247,120,186],three:0xf778ba},
+  {hex:"#39d2c0",rgb:[57,210,192],three:0x39d2c0},
+];
+
+/* ═══ UNIT SYSTEMS ═══ */
+const UNIT_SYSTEMS={
+  SI:  {name:"SI (m, °C)",         len:{f:1,       s:"m",  sArea:"m²"},  temp:{f:1,   off:0,  s:"°C"}},
+  MKS: {name:"MKS (m, °C)",        len:{f:1,       s:"m",  sArea:"m²"},  temp:{f:1,   off:0,  s:"°C"}},
+  CGS: {name:"CGS (cm, °C)",       len:{f:100,     s:"cm", sArea:"cm²"}, temp:{f:1,   off:0,  s:"°C"}},
+  USCS:{name:"Imperial (ft, °F)",  len:{f:3.28084, s:"ft", sArea:"ft²"}, temp:{f:1.8, off:32, s:"°F"}},
+  mm:  {name:"Workshop (mm, °C)",  len:{f:1000,    s:"mm", sArea:"mm²"}, temp:{f:1,   off:0,  s:"°C"}},
+};
+function makeUnits(key){
+  const sys=UNIT_SYSTEMS[key]||UNIT_SYSTEMS.SI;
+  const lf=sys.len.f, ls=sys.len.s, as2=sys.len.sArea;
+  const tf=sys.temp.f, to=sys.temp.off, ts=sys.temp.s;
+  const decL=lf>=100?0:lf>=3?1:2;
+  return{
+    lf,ls,tf,to,ts,as2,
+    L:v=>(v*lf).toFixed(decL)+" "+ls,
+    T:v=>(v*tf+to).toFixed(1)+ts,
+    dT:v=>(v*tf).toFixed(1)+ts,
+    A:v=>(v*lf*lf).toFixed(decL)+" "+as2,
+    ln:v=>(v*lf).toFixed(decL),
+    tn:v=>(v*tf+to).toFixed(1),
+    an:v=>(v*lf*lf).toFixed(decL),
+    fL:v=>v/lf,
+    fT:v=>(v-to)/tf,
+    fdT:v=>v/tf,
+    ftIn:key==="USCS",
+  };
+}
+
+/* ═══ VERSION ═══ */
+const APP_VERSION="3.4.0";
+
+/* ═══ THERMAL COLOR MAP ═══ */
+function thermalColor(t){
+  // t in 0..1 → blue(cold)→cyan→green→yellow→red(hot)→white(extreme)
+  const stops=[
+    [0,.05,.15],    // 0.0 dark blue
+    [0,.4,.8],      // 0.2 blue
+    [0,.7,.7],      // 0.35 cyan
+    [0,.8,.2],      // 0.5 green
+    [.9,.9,0],      // 0.65 yellow
+    [1,.3,0],       // 0.8 orange-red
+    [1,0,0],        // 0.9 red
+    [1,.6,.6],      // 1.0 hot pink/white
+  ];
+  const pos=[0,.15,.28,.45,.62,.78,.9,1];
+  let i=0;for(;i<pos.length-2;i++)if(t<=pos[i+1])break;
+  const f=(t-pos[i])/(pos[i+1]-pos[i]);
+  const c0=stops[i],c1=stops[i+1];
+  return[c0[0]+(c1[0]-c0[0])*f, c0[1]+(c1[1]-c0[1])*f, c0[2]+(c1[2]-c0[2])*f];
+}
+function thermalHex(t){const c=thermalColor(Math.max(0,Math.min(1,t)));return"#"+c.map(v=>Math.round(v*255).toString(16).padStart(2,"0")).join("")}
+function thermalCSS(t){const c=thermalColor(Math.max(0,Math.min(1,t)));return`rgb(${Math.round(c[0]*255)},${Math.round(c[1]*255)},${Math.round(c[2]*255)})`}
+
+/* ═══ RANDOM THERMAL DATA GENERATOR ═══ */
+function generateThermalData(zone,opts,diameter){
+  const{baseTemp,variance,hotspotCount,hotspotIntensity,hotspotRadius,coldspotCount,coldspotIntensity}=opts;
+  const R=diameter/2;
+  const arc=getArc(zone.clockStartH,zone.clockEndH);
+  const arcLen=R*arc.spanRad;
+  const cellsL=Math.max(1,Math.ceil(zone.gridLength/zone.pitchL));
+  const cellsT=Math.max(1,Math.ceil(arcLen/zone.pitchT));
+  const data=[];
+
+  // base noise
+  for(let r=0;r<cellsT;r++){
+    data[r]=[];
+    for(let c=0;c<cellsL;c++){
+      data[r][c]=baseTemp+(Math.random()-.5)*variance*2;
+    }
+  }
+  // smooth pass
+  const sm=data.map(row=>[...row]);
+  for(let r=0;r<cellsT;r++)for(let c=0;c<cellsL;c++){
+    let s=data[r][c],n=1;
+    if(r>0){s+=data[r-1][c];n++}if(r<cellsT-1){s+=data[r+1][c];n++}
+    if(c>0){s+=data[r][c-1];n++}if(c<cellsL-1){s+=data[r][c+1];n++}
+    sm[r][c]=s/n;
+  }
+  for(let r=0;r<cellsT;r++)for(let c=0;c<cellsL;c++)data[r][c]=sm[r][c];
+
+  // hotspots (gaussian blobs)
+  for(let h=0;h<hotspotCount;h++){
+    const hr=Math.random()*cellsT,hc=Math.random()*cellsL;
+    const rad=hotspotRadius*(Math.random()*.5+.75);
+    for(let r=0;r<cellsT;r++)for(let c=0;c<cellsL;c++){
+      const d=Math.sqrt((r-hr)**2+(c-hc)**2);
+      const g=Math.exp(-(d*d)/(2*rad*rad));
+      data[r][c]+=hotspotIntensity*g*(Math.random()*.3+.85);
+    }
+  }
+  // cold spots
+  for(let h=0;h<coldspotCount;h++){
+    const hr=Math.random()*cellsT,hc=Math.random()*cellsL;
+    const rad=hotspotRadius*(Math.random()*.4+.6);
+    for(let r=0;r<cellsT;r++)for(let c=0;c<cellsL;c++){
+      const d=Math.sqrt((r-hr)**2+(c-hc)**2);
+      const g=Math.exp(-(d*d)/(2*rad*rad));
+      data[r][c]-=coldspotIntensity*g*(Math.random()*.3+.85);
+    }
+  }
+  return{cellsL,cellsT,data,min:Math.min(...data.flat()),max:Math.max(...data.flat())};
+}
+
+/* ═══ ORBIT CONTROLS ═══ */
+function useOrbit(canvasRef,camRef,renRef,init){
+  const s=useRef({d:false,rb:false,lx:0,ly:0,th:init.theta,ph:init.phi,rad:init.radius,tgt:new THREE.Vector3(...init.target)});
+  useEffect(()=>{
+    const el=canvasRef.current;if(!el)return;const st=s.current;
+    const upd=()=>{const c=camRef.current;if(!c)return;c.position.set(st.tgt.x+st.rad*Math.sin(st.ph)*Math.cos(st.th),st.tgt.y+st.rad*Math.cos(st.ph),st.tgt.z+st.rad*Math.sin(st.ph)*Math.sin(st.th));c.lookAt(st.tgt);renRef.current&&renRef.current()};
+    const md=ev=>{st.d=true;st.rb=ev.button===2;st.lx=ev.clientX;st.ly=ev.clientY};
+    const mm=ev=>{if(!st.d)return;const dx=ev.clientX-st.lx,dy=ev.clientY-st.ly;st.lx=ev.clientX;st.ly=ev.clientY;if(st.rb){const c=camRef.current;if(!c)return;const r2=new THREE.Vector3,u=new THREE.Vector3;c.getWorldDirection(u);r2.crossVectors(u,c.up).normalize();u.crossVectors(r2,u).normalize();st.tgt.addScaledVector(r2,-dx*.005);st.tgt.addScaledVector(u,-dy*.005)}else{st.th-=dx*.005;st.ph-=dy*.005;st.ph=Math.max(.05,Math.min(Math.PI-.05,st.ph))}upd()};
+    const mu=()=>{st.d=false};
+    const mw=ev=>{ev.preventDefault();st.rad*=1+ev.deltaY*.001;st.rad=Math.max(1,Math.min(50,st.rad));upd()};
+    const cx=ev=>ev.preventDefault();
+    let ltd=0;
+    const ts=ev=>{if(ev.touches.length===1){st.d=true;st.rb=false;st.lx=ev.touches[0].clientX;st.ly=ev.touches[0].clientY}if(ev.touches.length===2)ltd=Math.hypot(ev.touches[0].clientX-ev.touches[1].clientX,ev.touches[0].clientY-ev.touches[1].clientY)};
+    const tm2=ev=>{ev.preventDefault();if(ev.touches.length===1&&st.d){const dx=ev.touches[0].clientX-st.lx,dy=ev.touches[0].clientY-st.ly;st.lx=ev.touches[0].clientX;st.ly=ev.touches[0].clientY;st.th-=dx*.005;st.ph-=dy*.005;st.ph=Math.max(.05,Math.min(Math.PI-.05,st.ph));upd()}if(ev.touches.length===2){const d2=Math.hypot(ev.touches[0].clientX-ev.touches[1].clientX,ev.touches[0].clientY-ev.touches[1].clientY);if(ltd>0){st.rad*=ltd/d2;st.rad=Math.max(1,Math.min(50,st.rad));upd()}ltd=d2}};
+    const te=()=>{st.d=false;ltd=0};
+    el.addEventListener("mousedown",md);el.addEventListener("wheel",mw,{passive:false});el.addEventListener("contextmenu",cx);
+    el.addEventListener("touchstart",ts,{passive:false});el.addEventListener("touchmove",tm2,{passive:false});el.addEventListener("touchend",te);
+    window.addEventListener("mousemove",mm);window.addEventListener("mouseup",mu);upd();
+    return()=>{el.removeEventListener("mousedown",md);el.removeEventListener("wheel",mw);el.removeEventListener("contextmenu",cx);el.removeEventListener("touchstart",ts);el.removeEventListener("touchmove",tm2);el.removeEventListener("touchend",te);window.removeEventListener("mousemove",mm);window.removeEventListener("mouseup",mu)};
+  },[]);
+}
+
+/* ═══ CLOCK/ARC ═══ */
+function clockToAngle(h){return(-(h%12)*Math.PI/6+2*Math.PI)%(2*Math.PI)}
+function getArc(s,en){const a1=clockToAngle(s),a2=clockToAngle(en);let sp=a1-a2;if(sp<=.001)sp+=2*Math.PI;return{startRad:a2,spanRad:sp,spanDeg:sp*180/Math.PI}}
+function clockHourToY(h,circ){let y=circ/2-(h%12)*(circ/12);return((y%circ)+circ)%circ}
+
+let zoneIdCounter=1;
+function makeZone(ov){return{id:zoneIdCounter++,name:"Zone "+(zoneIdCounter-1),gridStart:1,gridLength:3,clockStartH:10,clockEndH:2,pitchL:.3,pitchT:.3,...ov}}
+
+/* ═══ BUILD 3D VESSEL ═══ */
+function buildVessel(p){
+  const{length,diameter,zones,headDepth,thermalDataMap,globalMin,globalMax,showThermal}=p;
+  const R=diameter/2,g=new THREE.Group(),hd=headDepth||R*.4;
+  const shellMat=new THREE.MeshPhysicalMaterial({color:0x8899aa,transparent:true,opacity:.22,roughness:.5,side:THREE.DoubleSide,depthWrite:false});
+  const solidMat=new THREE.MeshPhysicalMaterial({color:0x8899aa,transparent:true,opacity:.35,roughness:.4,metalness:.05,side:THREE.DoubleSide});
+  const wireMat=new THREE.LineBasicMaterial({color:0x4a6a8a,transparent:true,opacity:.6});
+
+  // shell
+  const cg=new THREE.CylinderGeometry(R,R,length,64,1,true);cg.rotateZ(Math.PI/2);cg.translate(length/2,0,0);g.add(new THREE.Mesh(cg,shellMat));
+  for(const x of[0,length]){const pts=[];for(let i=0;i<=64;i++){const a=(i/64)*Math.PI*2;pts.push(x,R*Math.cos(a),R*Math.sin(a))}const bg=new THREE.BufferGeometry;bg.setAttribute("position",new THREE.Float32BufferAttribute(pts,3));g.add(new THREE.Line(bg,wireMat))}
+  // heads
+  const hs=32,rs=48;
+  for(const[xb,dir]of[[0,-1],[length,1]]){const vt=[],ix=[];for(let j=0;j<=hs;j++){const t=j/hs,r2=R*Math.cos(t*Math.PI/2),xo=dir*hd*Math.sin(t*Math.PI/2);for(let i=0;i<=rs;i++){const a=(i/rs)*Math.PI*2;vt.push(xb+xo,r2*Math.cos(a),r2*Math.sin(a))}}for(let j=0;j<hs;j++)for(let i=0;i<rs;i++){const a2=j*(rs+1)+i;ix.push(a2,a2+1,a2+rs+1,a2+1,a2+rs+2,a2+rs+1)}const hg=new THREE.BufferGeometry;hg.setAttribute("position",new THREE.Float32BufferAttribute(vt,3));hg.setIndex(ix);hg.computeVertexNormals();g.add(new THREE.Mesh(hg,solidMat))}
+  // saddles
+  const sadMat=new THREE.MeshPhysicalMaterial({color:0x667788,transparent:true,opacity:.3,roughness:.6,side:THREE.DoubleSide});
+  for(const sx of[length*.2,length*.8]){const sw=diameter*.15,sh=R*.5,sd=diameter*.6;for(const dz of[-sd/2,sd/2]){const sm=new THREE.Mesh(new THREE.BoxGeometry(sw,sh,sw*.3),sadMat);sm.position.set(sx,-R-sh/2,dz);g.add(sm)}const bm=new THREE.Mesh(new THREE.BoxGeometry(sw*1.5,sw*.2,sd+sw*.3),sadMat);bm.position.set(sx,-R-sh,0);g.add(bm)}
+  // nozzles
+  const nzMat=new THREE.MeshPhysicalMaterial({color:0x7a8a9a,transparent:true,opacity:.35,roughness:.4,side:THREE.DoubleSide});
+  for(const n of[{x:length*.3,a:0,r:R*.08,h:R*.3},{x:length*.5,a:0,r:R*.1,h:R*.35},{x:length*.7,a:0,r:R*.07,h:R*.25}]){
+    const ny=(R+n.h/2)*Math.cos(n.a),nz2=(R+n.h/2)*Math.sin(n.a);
+    const nm=new THREE.Mesh(new THREE.CylinderGeometry(n.r,n.r,n.h,16),nzMat);nm.position.set(n.x,ny,nz2);nm.rotation.x=-n.a;g.add(nm);
+    const fm=new THREE.Mesh(new THREE.TorusGeometry(n.r*1.5,n.r*.2,8,16),nzMat);fm.position.set(n.x,(R+n.h)*Math.cos(n.a),(R+n.h)*Math.sin(n.a));fm.rotation.x=Math.PI/2-n.a;g.add(fm);
+  }
+  // axis
+  const axm=new THREE.LineDashedMaterial({color:0x556677,dashSize:.12,gapSize:.04});const axg=new THREE.BufferGeometry;axg.setAttribute("position",new THREE.Float32BufferAttribute([-hd-.3,0,0,length+hd+.3,0,0],3));const axl=new THREE.Line(axg,axm);axl.computeLineDistances();g.add(axl);
+  // clock ticks
+  for(let h=0;h<12;h++){const a=clockToAngle(h),isMaj=h%3===0,r1=R*(isMaj?.78:.85),r2b=R*1.06;const bg=new THREE.BufferGeometry;bg.setAttribute("position",new THREE.Float32BufferAttribute([-hd*.3,r1*Math.cos(a),r1*Math.sin(a),-hd*.3,r2b*Math.cos(a),r2b*Math.sin(a)],3));g.add(new THREE.Line(bg,new THREE.LineBasicMaterial({color:isMaj?0x8899aa:0x556677})))}
+
+  // zones
+  zones.forEach((z,zi)=>{
+    const col=ZONE_COLORS[zi%ZONE_COLORS.length];
+    const arc=getArc(z.clockStartH,z.clockEndH);
+    const arcS=arc.startRad,arcSp=arc.spanRad;
+    const td=thermalDataMap&&thermalDataMap[z.id];
+    const hasThermal=showThermal&&td&&td.data&&td.data.length>0;
+
+    if(hasThermal){
+      const cL=td.cellsL,cT=td.cellsT;
+      const range=globalMax-globalMin||1;
+      const verts=[],indices=[],colors=[];
+      let vertOffset=0;
+      const segs=4;
+
+      for(let ri=0;ri<cT;ri++)for(let ci=0;ci<cL;ci++){
+        const t=(td.data[ri][ci]-globalMin)/range;
+        const tc=thermalColor(Math.max(0,Math.min(1,t)));
+        const a0=arcS+(ri/cT)*arcSp,a1=arcS+((ri+1)/cT)*arcSp;
+        const x0=z.gridStart+(ci/cL)*z.gridLength,x1=z.gridStart+((ci+1)/cL)*z.gridLength;
+
+        for(let aj=0;aj<=segs;aj++){
+          const a=a0+(aj/segs)*(a1-a0);
+          verts.push(x0,R*1.004*Math.cos(a),R*1.004*Math.sin(a));
+          verts.push(x1,R*1.004*Math.cos(a),R*1.004*Math.sin(a));
+          colors.push(tc[0],tc[1],tc[2]);
+          colors.push(tc[0],tc[1],tc[2]);
+        }
+
+        for(let aj=0;aj<segs;aj++){
+          const b=vertOffset+aj*2;
+          indices.push(b,b+1,b+2, b+1,b+3,b+2);
+        }
+        vertOffset+=(segs+1)*2;
+      }
+
+      const bg2=new THREE.BufferGeometry;
+      bg2.setAttribute("position",new THREE.Float32BufferAttribute(verts,3));
+      bg2.setAttribute("color",new THREE.Float32BufferAttribute(colors,3));
+      bg2.setIndex(indices);bg2.computeVertexNormals();
+      const mat=new THREE.MeshBasicMaterial({vertexColors:true,transparent:true,opacity:.85,side:THREE.DoubleSide});
+      g.add(new THREE.Mesh(bg2,mat));
+
+      // grid lines over thermal
+      const glm2=new THREE.LineBasicMaterial({color:0x000000,transparent:true,opacity:.15});
+      for(let k=0;k<=cL;k++){const x=z.gridStart+(k/cL)*z.gridLength;const pts=[];for(let i=0;i<=20;i++){const a=arcS+(i/20)*arcSp;pts.push(x,R*1.005*Math.cos(a),R*1.005*Math.sin(a))}const bg=new THREE.BufferGeometry;bg.setAttribute("position",new THREE.Float32BufferAttribute(pts,3));g.add(new THREE.Line(bg,glm2))}
+      for(let k=0;k<=cT;k++){const a=arcS+(k/cT)*arcSp;const pts=[];for(let i=0;i<=20;i++)pts.push(z.gridStart+(i/20)*z.gridLength,R*1.005*Math.cos(a),R*1.005*Math.sin(a));const bg=new THREE.BufferGeometry;bg.setAttribute("position",new THREE.Float32BufferAttribute(pts,3));g.add(new THREE.Line(bg,glm2))}
+    } else {
+      // zone surface
+      const su=50,sv=30,vv=[],ii2=[];
+      for(let j=0;j<=sv;j++)for(let i=0;i<=su;i++){const a=arcS+(j/sv)*arcSp;vv.push(z.gridStart+(i/su)*z.gridLength,R*1.003*Math.cos(a),R*1.003*Math.sin(a))}
+      for(let j=0;j<sv;j++)for(let i=0;i<su;i++){const a2=j*(su+1)+i;ii2.push(a2,a2+1,a2+su+1,a2+1,a2+su+2,a2+su+1)}
+      const gg2=new THREE.BufferGeometry;gg2.setAttribute("position",new THREE.Float32BufferAttribute(vv,3));gg2.setIndex(ii2);gg2.computeVertexNormals();
+      g.add(new THREE.Mesh(gg2,new THREE.MeshPhysicalMaterial({color:col.three,transparent:true,opacity:.3,roughness:.3,side:THREE.DoubleSide})));
+      // grid lines
+      const glm2=new THREE.LineBasicMaterial({color:col.three,transparent:true,opacity:.4});
+      const arcLen=R*arcSp;
+      const nT=Math.max(1,Math.ceil(arcLen/z.pitchT));
+      for(let k=0;k<=nT;k++){const a=arcS+(k/nT)*arcSp;const pts=[];for(let i=0;i<=30;i++)pts.push(z.gridStart+(i/30)*z.gridLength,R*1.004*Math.cos(a),R*1.004*Math.sin(a));const bg=new THREE.BufferGeometry;bg.setAttribute("position",new THREE.Float32BufferAttribute(pts,3));g.add(new THREE.Line(bg,glm2))}
+      const nL=Math.max(1,Math.ceil(z.gridLength/z.pitchL));
+      for(let k=0;k<=nL;k++){const x=z.gridStart+(k/nL)*z.gridLength;const pts=[];for(let i=0;i<=30;i++){const a=arcS+(i/30)*arcSp;pts.push(x,R*1.004*Math.cos(a),R*1.004*Math.sin(a))}const bg=new THREE.BufferGeometry;bg.setAttribute("position",new THREE.Float32BufferAttribute(pts,3));g.add(new THREE.Line(bg,glm2))}
+    }
+    // boundary
+    const bm2=new THREE.LineBasicMaterial({color:hasThermal?0xffffff:col.three,transparent:true,opacity:hasThermal?.6:.8});
+    for(const x of[z.gridStart,z.gridStart+z.gridLength]){const pts=[];for(let i=0;i<=30;i++){const a=arcS+(i/30)*arcSp;pts.push(x,R*1.006*Math.cos(a),R*1.006*Math.sin(a))}const bg=new THREE.BufferGeometry;bg.setAttribute("position",new THREE.Float32BufferAttribute(pts,3));g.add(new THREE.Line(bg,bm2))}
+    for(const a of[arcS,arcS+arcSp]){const bg=new THREE.BufferGeometry;bg.setAttribute("position",new THREE.Float32BufferAttribute([z.gridStart,R*1.006*Math.cos(a),R*1.006*Math.sin(a),z.gridStart+z.gridLength,R*1.006*Math.cos(a),R*1.006*Math.sin(a)],3));g.add(new THREE.Line(bg,bm2))}
+  });
+  return g;
+}
+
+/* ═══ THREE CANVAS ═══ */
+function ThreeCanvas({buildFn,params,orbit,style}){
+  const canvasRef=useRef(null),camRef=useRef(null),renRef=useRef(null),scnRef=useRef(null),grpRef=useRef(null);
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+
+  useEffect(()=>{
+    const el=canvasRef.current;if(!el)return;
+    const renderer=new THREE.WebGLRenderer({canvas:el,antialias:true});renderer.setPixelRatio(window.devicePixelRatio);renderer.setClearColor(0xf6f8fa,1);
+    const scene=new THREE.Scene();scnRef.current=scene;
+    const camera=new THREE.PerspectiveCamera(40,1,.1,100);camRef.current=camera;
+    scene.add(new THREE.AmbientLight(0x889aaa,.9));
+    const d1=new THREE.DirectionalLight(0xffffff,.8);d1.position.set(5,8,6);scene.add(d1);
+    const d2=new THREE.DirectionalLight(0x6688aa,.3);d2.position.set(-4,3,-5);scene.add(d2);
+    const grid=new THREE.GridHelper(24,48,0xd0d7de,0xe8edf3);
+    grid.position.y=-(paramsRef.current.diameter||2.2)-.5;
+    scene.add(grid);
+
+    renRef.current=()=>renderer.render(scene,camera);
+    const resize=()=>{const ww=el.clientWidth,hh=el.clientHeight;if(ww<1||hh<1)return;renderer.setSize(ww,hh);camera.aspect=ww/hh;camera.updateProjectionMatrix();renRef.current()};
+    const ro=new ResizeObserver(resize);ro.observe(el);resize();
+
+    // Raycasting tooltip setup
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    const tooltip = el.parentNode ? el.parentNode.querySelector("#three-tooltip") : null;
+
+    const onMouseMove = (ev) => {
+      const rect = el.getBoundingClientRect();
+      mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+
+      const cam = camRef.current;
+      const scn = scnRef.current;
+      const grp = grpRef.current;
+      if (!cam || !scn || !grp || !tooltip) return;
+
+      raycaster.setFromCamera(mouse, cam);
+      const intersects = raycaster.intersectObjects(grp.children, true);
+      let found = false;
+      const currentParams = paramsRef.current;
+
+      for (let hit of intersects) {
+        const pt = hit.point;
+        const vx = pt.x; // longitudinal position
+        let angle = Math.atan2(pt.z, pt.y);
+        if (angle < 0) angle += 2 * Math.PI;
+
+        const zones = currentParams.zones;
+        const R = currentParams.diameter / 2;
+
+        for (let zi = 0; zi < zones.length; zi++) {
+          const z = zones[zi];
+          const arc = getArc(z.clockStartH, z.clockEndH);
+          const arcS = arc.startRad;
+          const arcSp = arc.spanRad;
+
+          // Check if point is inside longitudinal range
+          if (vx >= z.gridStart && vx <= z.gridStart + z.gridLength) {
+            // Check angular range
+            let diff = angle - arcS;
+            while (diff < 0) diff += 2 * Math.PI;
+            diff = diff % (2 * Math.PI);
+
+            if (diff <= arcSp + 0.02) { // small epsilon for boundary
+              const td = currentParams.thermalDataMap && currentParams.thermalDataMap[z.id];
+              const hasThermal = currentParams.showThermal && td && td.data && td.data.length > 0;
+              const cL = td ? td.cellsL : Math.max(1, Math.ceil(z.gridLength / z.pitchL));
+              const cT = td ? td.cellsT : Math.max(1, Math.ceil((R * arcSp) / z.pitchT));
+
+              const ci = Math.min(cL - 1, Math.floor(((vx - z.gridStart) / z.gridLength) * cL));
+              const ri = Math.min(cT - 1, Math.floor((diff / arcSp) * cT));
+
+              let hFloat = (((2 * Math.PI - angle) % (2 * Math.PI)) * 6) / Math.PI;
+              if (hFloat < 0.05) hFloat += 12;
+              const hHour = Math.round(hFloat) || 12;
+
+              const cu = currentParams.units || makeUnits("SI");
+              let tooltipHTML = `
+                <div style="font-weight:700;color:#58a6ff;margin-bottom:3px">${z.name}</div>
+                Longitudinal: <strong>${cu.L(vx)}</strong> (Start: ${cu.L(z.gridStart)})<br/>
+                Clock Position: <strong>${hHour} o'clock</strong> (Arc: ~${Math.round(arc.spanDeg)}°)<br/>
+                Grid Cell: <strong>Row ${ri + 1}, Col ${ci + 1}</strong> (${cL}x${cT})
+              `;
+
+              if (hasThermal) {
+                const temp = td.data[ri][ci];
+                const ratio = (temp - currentParams.globalMin) / (currentParams.globalMax - currentParams.globalMin || 1);
+                tooltipHTML += `<br/>Temperature: <strong style="color:${thermalHex(ratio)}">${cu.T(temp)}</strong>`;
+              } else {
+                tooltipHTML += `<br/><span style="color:#8b949e">No thermal scan loaded</span>`;
+              }
+
+              tooltip.innerHTML = tooltipHTML;
+              tooltip.style.display = "block";
+              tooltip.style.left = (ev.clientX - rect.left + 15) + "px";
+              tooltip.style.top = (ev.clientY - rect.top + 15) + "px";
+              found = true;
+              break;
+            }
+          }
+        }
+        if (found) break;
+      }
+
+      if (!found) {
+        tooltip.style.display = "none";
+      }
+    };
+
+    const onMouseLeave = () => {
+      if (tooltip) tooltip.style.display = "none";
+    };
+
+    el.addEventListener("mousemove", onMouseMove);
+    el.addEventListener("mouseleave", onMouseLeave);
+
+    return()=>{
+      ro.disconnect();
+      renderer.dispose();
+      el.removeEventListener("mousemove", onMouseMove);
+      el.removeEventListener("mouseleave", onMouseLeave);
+    };
+  },[]);
+
+  useEffect(()=>{
+    const scene=scnRef.current;if(!scene)return;
+    if(grpRef.current)scene.remove(grpRef.current);
+    const grp=buildFn(params);scene.add(grp);grpRef.current=grp;
+    scene.children.forEach(ch=>{if(ch.isGridHelper)ch.position.y=-(params.diameter||2.2)-.5});
+    renRef.current&&renRef.current();
+  },[params,buildFn]);
+
+  useOrbit(canvasRef,camRef,renRef,orbit);
+
+  return e("div",{style:{position:"relative",width:"100%",height:"100%"}},
+    e("canvas",{ref:canvasRef,style}),
+    e("div",{id:"three-tooltip",style:{position:"absolute",display:"none",background:"rgba(255,255,255,0.97)",border:"1px solid #d0d7de",padding:"9px 13px",borderRadius:7,fontSize:12,color:"#1f2328",pointerEvents:"none",zIndex:10,fontFamily:"'IBM Plex Sans',sans-serif",boxShadow:"0 4px 16px rgba(0,0,0,.14)",lineHeight:"1.5",minWidth:200}})
+  );
+}
+
+/* ═══ ROLLOUT 2D ═══ */
+function Rollout2D({length,diameter,zones,thermalDataMap,globalMin,globalMax,showThermal}){
+  const canvasRef=useRef(null);
+  const R=diameter/2,circ=Math.PI*diameter;
+  useEffect(()=>{
+    const cv=canvasRef.current;if(!cv)return;
+    const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;cv.width=w*dpr;cv.height=h*dpr;
+    const ctx=cv.getContext("2d");ctx.scale(dpr,dpr);ctx.clearRect(0,0,w,h);
+    const margin={top:40,right:60,bottom:50,left:65};
+    const pw=w-margin.left-margin.right,ph=h-margin.top-margin.bottom;
+    const scX=pw/length,scY=ph/circ,ox=margin.left,oy=margin.top;
+    const tx=x=>ox+x*scX,ty=y=>oy+ph-y*scY;
+
+    ctx.fillStyle="#f6f8fa";ctx.fillRect(0,0,w,h);
+    ctx.fillStyle="#ffffff";ctx.strokeStyle="#afb8c1";ctx.lineWidth=1;
+    ctx.fillRect(tx(0),ty(circ),tx(length)-tx(0),ty(0)-ty(circ));
+    ctx.strokeRect(tx(0),ty(circ),tx(length)-tx(0),ty(0)-ty(circ));
+
+    // clock ref
+    ctx.setLineDash([4,4]);ctx.strokeStyle="#d0d7de";ctx.lineWidth=.8;
+    for(const[hr,y]of[[12,circ/2],[3,circ/4],[6,0],[9,3*circ/4]]){ctx.beginPath();ctx.moveTo(tx(0),ty(y));ctx.lineTo(tx(length),ty(y));ctx.stroke();ctx.fillStyle="#6e7781";ctx.font="bold 11px 'IBM Plex Mono',monospace";ctx.textAlign="right";ctx.fillText(String(hr),tx(0)-5,ty(y)+4)}
+    ctx.setLineDash([]);
+
+    const range=globalMax-globalMin||1;
+
+    zones.forEach((z,zi)=>{
+      const col=ZONE_COLORS[zi%ZONE_COLORS.length];
+      const arc=getArc(z.clockStartH,z.clockEndH);
+      const arcLen=R*arc.spanRad;
+      let yEnd2=clockHourToY(z.clockEndH,circ),yStart2=clockHourToY(z.clockStartH,circ);
+      if(yStart2<=yEnd2+.001)yStart2+=circ;
+      const yLo=yEnd2,yHi=yStart2;
+      const td=thermalDataMap&&thermalDataMap[z.id];
+      const hasThermal=showThermal&&td&&td.data&&td.data.length>0;
+
+      const drawZone=(yA,yB)=>{
+        const x1=tx(z.gridStart),x2=tx(z.gridStart+z.gridLength),y1r=ty(yB),y2r=ty(yA);
+        if(hasThermal){
+          const cL=td.cellsL,cT=td.cellsT;
+          const cellW=(x2-x1)/cL,cellH=(y2r-y1r)/cT;
+          const ySpan=yB-yA,totalYSpan=yHi-yLo;
+          const tOff=(yA-yLo)/totalYSpan;
+          for(let ri=0;ri<cT;ri++)for(let ci=0;ci<cL;ci++){
+            const riMapped=Math.floor((tOff+((ri+.5)/cT)*(ySpan/totalYSpan))*cT);
+            const riC=Math.max(0,Math.min(cT-1,riMapped));
+            const t=(td.data[riC][ci]-globalMin)/range;
+            ctx.fillStyle=thermalCSS(Math.max(0,Math.min(1,t)));
+            ctx.fillRect(x1+ci*cellW,y1r+ri*cellH,cellW+.5,cellH+.5);
+          }
+          // grid lines
+          ctx.strokeStyle="rgba(0,0,0,0.2)";ctx.lineWidth=.3;
+          for(let k=0;k<=cL;k++){const x=x1+k*cellW;ctx.beginPath();ctx.moveTo(x,y1r);ctx.lineTo(x,y2r);ctx.stroke()}
+          for(let k=0;k<=cT;k++){const y=y1r+k*cellH;ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.stroke()}
+        }else{
+          ctx.fillStyle=`rgba(${col.rgb[0]},${col.rgb[1]},${col.rgb[2]},0.1)`;
+          ctx.fillRect(x1,y1r,x2-x1,y2r-y1r);
+          ctx.strokeStyle=`rgba(${col.rgb[0]},${col.rgb[1]},${col.rgb[2]},0.25)`;ctx.lineWidth=.4;
+          const nL2=Math.max(1,Math.ceil(z.gridLength/z.pitchL));
+          for(let k=0;k<=nL2;k++){const x=z.gridStart+(k/nL2)*z.gridLength;ctx.beginPath();ctx.moveTo(tx(x),y1r);ctx.lineTo(tx(x),y2r);ctx.stroke()}
+          const zH=yB-yA,nT2=Math.max(1,Math.ceil(zH/z.pitchT));
+          for(let k=0;k<=nT2;k++){const yy=yA+(k/nT2)*zH;ctx.beginPath();ctx.moveTo(x1,ty(yy));ctx.lineTo(x2,ty(yy));ctx.stroke()}
+        }
+        ctx.strokeStyle=hasThermal?"rgba(255,255,255,0.6)":col.hex;ctx.lineWidth=1.5;ctx.strokeRect(x1,y1r,x2-x1,y2r-y1r);
+        ctx.fillStyle=hasThermal?"#1f2328":col.hex;ctx.font="bold 12px 'IBM Plex Sans',sans-serif";ctx.textAlign="center";
+        ctx.fillText(z.name,(x1+x2)/2,y1r-5);
+      };
+      if(yHi<=circ)drawZone(yLo,yHi);else{drawZone(yLo,circ);drawZone(0,yHi-circ)}
+    });
+
+    ctx.fillStyle="#1f2328";ctx.font="bold 13px 'IBM Plex Sans',sans-serif";ctx.textAlign="left";
+    ctx.fillText("SURFACE ROLLOUT — TOP VIEW (UNWRAPPED)",ox,20);
+    ctx.fillStyle="#57606a";ctx.font="11px 'IBM Plex Sans',sans-serif";
+    ctx.fillText(showThermal?"Thermal overlay active  |  12 o'clock = top center":"12 o'clock = top center  |  Zones color-coded",ox,34);
+  },[length,diameter,zones,thermalDataMap,globalMin,globalMax,showThermal]);
+  return e("canvas",{ref:canvasRef,style:{width:"100%",height:"100%",display:"block"}});
+}
+
+/* ═══ CLOCK SELECTOR ═══ */
+function ClockSelector({startH,endH,onStartChange,onEndChange,color}){
+  const sz=168,cx2=sz/2,cy2=sz/2,r=65;
+  const hToSvg=h=>-90+(h%12)*30,hToRad2=h=>hToSvg(h)*Math.PI/180;
+  const startA=hToSvg(startH);let sweep=hToSvg(endH)-startA;if(sweep<=0)sweep+=360;
+  const arcPath=()=>{const r2=r-7,sa=startA*Math.PI/180,ea=(startA+sweep)*Math.PI/180;return"M "+(cx2+r2*Math.cos(sa))+" "+(cy2+r2*Math.sin(sa))+" A "+r2+" "+r2+" 0 "+(sweep>180?1:0)+" 1 "+(cx2+r2*Math.cos(ea))+" "+(cy2+r2*Math.sin(ea))};
+  const onClick=ev=>{const rect=ev.currentTarget.getBoundingClientRect();let ang=Math.atan2(ev.clientY-rect.top-cy2,ev.clientX-rect.left-cx2)*180/Math.PI+90;if(ang<0)ang+=360;const hour=Math.round(ang/30)%12||12;const dS=Math.min(Math.abs(hour-startH),12-Math.abs(hour-startH)),dE=Math.min(Math.abs(hour-endH),12-Math.abs(hour-endH));if(dS<=dE)onStartChange(hour);else onEndChange(hour)};
+  return e("svg",{width:sz,height:sz,style:{cursor:"pointer"},onClick},
+    e("circle",{cx:cx2,cy:cy2,r,fill:"#ffffff",stroke:"#afb8c1",strokeWidth:"2"}),
+    e("path",{d:arcPath(),fill:"none",stroke:color,strokeWidth:"7",opacity:"0.2"}),
+    e("path",{d:arcPath(),fill:"none",stroke:color,strokeWidth:"2"}),
+    [1,2,3,4,5,6,7,8,9,10,11,12].map(h=>{
+      const a=hToRad2(h),isEnd=h===startH||h===endH,isMaj=h%3===0;
+      return e("g",{key:h},
+        e("line",{x1:cx2+(r-9)*Math.cos(a),y1:cy2+(r-9)*Math.sin(a),x2:cx2+(r-2)*Math.cos(a),y2:cy2+(r-2)*Math.sin(a),stroke:isEnd?color:isMaj?"#57606a":"#6e7781",strokeWidth:isEnd?2:1}),
+        e("text",{x:cx2+(r-18)*Math.cos(a),y:cy2+(r-18)*Math.sin(a)+3,textAnchor:"middle",fontSize:isEnd?"10":isMaj?"9":"8",fontWeight:isEnd?"800":"600",fill:isEnd?color:"#57606a",fontFamily:"monospace"},h),
+        isEnd&&e("circle",{cx:cx2+(r-2)*Math.cos(a),cy:cy2+(r-2)*Math.sin(a),r:"4",fill:color,stroke:"#f6f8fa",strokeWidth:"2"})
+      )
+    }),
+    e("text",{x:cx2,y:cy2-4,textAnchor:"middle",fontSize:"14",fontWeight:"800",fill:"#1f2328",fontFamily:"monospace"},Math.round(getArc(startH,endH).spanDeg)+"°"),
+    e("text",{x:cx2,y:cy2+9,textAnchor:"middle",fontSize:"8",fill:"#57606a",fontFamily:"sans-serif"},startH+"→"+endH+" o'clk")
+  );
+}
+
+/* ═══ UI HELPERS ═══ */
+/* ═══ NUMERIC INPUT (editable value display) ═══ */
+function NumInput({value,min,max,step,onChange,accent,width}){
+  const[s,setS]=useState(null);
+  const d=step<1?2:step<10?1:0;
+  return e("input",{type:"text",inputMode:"decimal",value:s!==null?s:value.toFixed(d),
+    style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:14,fontWeight:700,color:accent||"#0969da",
+           background:"transparent",border:"1px solid transparent",textAlign:"right",
+           borderRadius:4,padding:"1px 4px",outline:"none",width:width||58},
+    onFocus:ev=>{setS(value.toFixed(d));ev.target.select();ev.target.style.borderColor=accent||"#0969da";ev.target.style.background="#f0f7ff"},
+    onChange:ev=>setS(ev.target.value),
+    onBlur:ev=>{const v=parseFloat(s||"");setS(null);ev.target.style.borderColor="transparent";ev.target.style.background="transparent";if(!isNaN(v))onChange(Math.max(min,Math.min(max,v)))},
+    onKeyDown:ev=>{
+      if(ev.key==="Enter"){const v=parseFloat(s||"");setS(null);if(!isNaN(v))onChange(Math.max(min,Math.min(max,v)));ev.target.blur()}
+      if(ev.key==="Escape"){setS(null);ev.target.blur()}
+    }
+  });
+}
+/* ═══ FT + IN INPUT (Imperial length entry) ═══ */
+function FtInInput({value,min,max,onChange,accent}){
+  const a=accent||"#0969da";
+  const ftV=Math.floor(Math.max(0,value)),rawI=Math.round((value-Math.floor(Math.max(0,value)))*12);
+  const fD=rawI>=12?ftV+1:ftV,iD=rawI>=12?0:rawI;
+  const[fS,setFS]=useState(null);const[iS,setIS]=useState(null);
+  const iSt={fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:700,color:"#1f2328",
+              background:"#ffffff",border:"1px solid #afb8c1",borderRadius:5,textAlign:"center",outline:"none",padding:"3px 5px"};
+  const cF=v=>{const f=isNaN(v)?fD:Math.max(0,v);onChange(Math.max(min,Math.min(max,f+iD/12)))};
+  const cI=v=>{const i=isNaN(v)?iD:Math.max(0,Math.min(11,v));onChange(Math.max(min,Math.min(max,fD+i/12)))};
+  return e("div",{style:{display:"flex",alignItems:"center",gap:4}},
+    e("input",{type:"text",inputMode:"numeric",value:fS!==null?fS:String(fD),style:{...iSt,width:46},
+      onFocus:ev=>{setFS(String(fD));ev.target.select();ev.target.style.borderColor=a},
+      onChange:ev=>setFS(ev.target.value),
+      onBlur:ev=>{ev.target.style.borderColor="#afb8c1";cF(parseInt(fS||""));setFS(null)},
+      onKeyDown:ev=>{if(ev.key==="Enter"){cF(parseInt(fS||""));setFS(null);ev.target.blur()}}}),
+    e("span",{style:{fontSize:12,color:a,fontWeight:700}},"ft"),
+    e("input",{type:"text",inputMode:"numeric",value:iS!==null?iS:String(iD),style:{...iSt,width:36},
+      onFocus:ev=>{setIS(String(iD));ev.target.select();ev.target.style.borderColor=a},
+      onChange:ev=>setIS(ev.target.value),
+      onBlur:ev=>{ev.target.style.borderColor="#afb8c1";cI(parseInt(iS||""));setIS(null)},
+      onKeyDown:ev=>{if(ev.key==="Enter"){cI(parseInt(iS||""));setIS(null);ev.target.blur()}}}),
+    e("span",{style:{fontSize:12,color:a,fontWeight:700}},"in")
+  );
+}
+/* ═══ SLIDER ═══ */
+function Slider({label,value,min,max,step,unit,onChange,accent,ftIn}){
+  accent=accent||"#0969da";
+  return e("div",{style:{marginBottom:12}},
+    e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
+      e("span",{style:{fontSize:11,fontWeight:600,letterSpacing:".04em",textTransform:"uppercase",color:"#57606a"}},label),
+      ftIn
+        ?e(FtInInput,{value,min,max,onChange,accent})
+        :e("div",{style:{display:"flex",alignItems:"center",gap:3}},
+            e(NumInput,{value,min,max,step,onChange,accent}),
+            e("span",{style:{fontSize:11,fontWeight:600,color:"#57606a",lineHeight:1}},unit.trim())
+          )
+    ),
+    e("input",{type:"range",min,max,step,value,onChange:ev=>onChange(parseFloat(ev.target.value)),style:{"--accent":accent}})
+  );
+}
+function InfoRow({label,value,color}){
+  return e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #d0d7de"}},
+    e("span",{style:{fontSize:11,color:"#57606a",textTransform:"uppercase",letterSpacing:".04em",fontWeight:500}},label),
+    e("span",{style:{fontSize:13,color:color||"#1f2328",fontFamily:"'IBM Plex Mono',monospace",fontWeight:600}},value)
+  );
+}
+function SectionHead({icon,text,right}){
+  return e("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",margin:"18px 0 9px"}},
+    e("div",{style:{display:"flex",alignItems:"center",gap:8}},
+      e("div",{style:{width:3,height:16,borderRadius:2,background:"#0969da",flexShrink:0}}),
+      e("span",{style:{fontSize:11,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:"#0969da"}},icon+" "+text)
+    ),
+    right||null
+  );
+}
+
+/* ═══ ZONE EDITOR ═══ */
+function ZoneEditor({zone,index,color,onChange,onRemove,isExpanded,onToggle,vesselLength,units}){
+  const col=color;const set=(k,v)=>onChange({...zone,[k]:v});
+  return e("div",{style:{border:"1px solid #d0d7de",borderLeft:"3px solid "+col.hex,borderRadius:7,marginBottom:7,background:"#ffffff",overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}},
+    e("div",{onClick:onToggle,style:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 12px",cursor:"pointer",background:isExpanded?"#f0f7ff":"transparent"}},
+      e("div",{style:{display:"flex",alignItems:"center",gap:7}},
+        e("div",{style:{width:10,height:10,borderRadius:"50%",background:col.hex}}),
+        e("input",{value:zone.name,onClick:ev=>ev.stopPropagation(),onChange:ev=>set("name",ev.target.value),style:{fontSize:13,fontWeight:700,color:"#1f2328",border:"none",background:"transparent",width:100,outline:"none",fontFamily:"inherit"}})
+      ),
+      e("div",{style:{display:"flex",alignItems:"center",gap:6}},
+        e("span",{style:{fontSize:10,color:"#6e7781"}},isExpanded?"▼":"▶"),
+        e("button",{onClick:ev=>{ev.stopPropagation();onRemove()},style:{fontSize:13,background:"none",border:"none",color:"#afb8c1",cursor:"pointer",padding:"0 3px",lineHeight:1}},"✕")
+      )
+    ),
+    isExpanded&&e("div",{style:{padding:"12px 14px",borderTop:"1px solid #d0d7de"}},
+      e(Slider,{label:"Start Pos",value:zone.gridStart*units.lf,min:0,max:Math.max(0,vesselLength-1)*units.lf,step:.25*units.lf,unit:" "+units.ls,onChange:v=>set("gridStart",units.fL(v)),accent:col.hex,ftIn:units.ftIn}),
+      e(Slider,{label:"Grid Length",value:zone.gridLength*units.lf,min:.5*units.lf,max:vesselLength*units.lf,step:.25*units.lf,unit:" "+units.ls,onChange:v=>set("gridLength",units.fL(v)),accent:col.hex,ftIn:units.ftIn}),
+      e("div",{style:{display:"flex",justifyContent:"center",margin:"4px 0"}},
+        e(ClockSelector,{startH:zone.clockStartH,endH:zone.clockEndH,onStartChange:v=>set("clockStartH",v),onEndChange:v=>set("clockEndH",v),color:col.hex})
+      ),
+      e(Slider,{label:"Pitch L",value:zone.pitchL*units.lf,min:.05*units.lf,max:2*units.lf,step:.05*units.lf,unit:" "+units.ls,onChange:v=>set("pitchL",units.fL(v)),accent:"#3fb950",ftIn:units.ftIn}),
+      e(Slider,{label:"Pitch T",value:zone.pitchT*units.lf,min:.05*units.lf,max:2*units.lf,step:.05*units.lf,unit:" "+units.ls,onChange:v=>set("pitchT",units.fL(v)),accent:"#3fb950",ftIn:units.ftIn})
+    )
+  );
+}
+
+/* ═══ THERMAL LEGEND ═══ */
+function ThermalLegend({min,max,units}){
+  const steps=16;
+  const u=units||{T:v=>v.toFixed(1)+"°C"};
+  return e("div",{style:{display:"flex",alignItems:"center",gap:8,padding:"5px 0"}},
+    e("span",{style:{fontSize:11,fontFamily:"'IBM Plex Mono',monospace",color:"#57606a",whiteSpace:"nowrap"}},u.T(min)),
+    e("div",{style:{display:"flex",flex:1,height:14,borderRadius:3,overflow:"hidden",boxShadow:"inset 0 1px 2px rgba(0,0,0,.1)"}},
+      Array.from({length:steps},(_,i)=>e("div",{key:i,style:{flex:1,background:thermalCSS(i/(steps-1))}}))
+    ),
+    e("span",{style:{fontSize:11,fontFamily:"'IBM Plex Mono',monospace",color:"#57606a",whiteSpace:"nowrap"}},u.T(max))
+  );
+}
+
+/* ═══ GRID DETAILS TABLE ═══ */
+function GridDetailsTable({zones,diameter,thermalDataMap,globalMin,globalMax,showThermalCols,units}){
+  const R=diameter/2;
+  const u=units||makeUnits("SI");
+  const baseHeaders=["Zone","Start ("+u.ls+")","Length ("+u.ls+")","Arc","P_L ("+u.ls+")","P_T ("+u.ls+")","Cells L","Cells T","Total","Area ("+u.as2+")"];
+  const thermalHeaders=["Min ("+u.ts+")","Max ("+u.ts+")","Avg ("+u.ts+")","Hotspots"];
+  const headers=showThermalCols?[...baseHeaders,...thermalHeaders]:baseHeaders;
+  const mono={fontFamily:"'IBM Plex Mono',monospace"};
+  return e("div",{style:{overflowX:"auto"}},
+    e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11}},
+      e("thead",null,
+        e("tr",{style:{background:"#f6f8fa"}},
+          headers.map((h,i)=>
+            e("th",{key:i,style:{padding:"8px 6px",fontWeight:700,color:"#0969da",textAlign:i===0?"left":"center",borderBottom:"2px solid #d0d7de",whiteSpace:"nowrap",letterSpacing:".04em",fontSize:10.5}},h)
+          )
+        )
+      ),
+      e("tbody",null,
+        zones.map((z,zi)=>{
+          const col=ZONE_COLORS[zi%ZONE_COLORS.length];
+          const arc=getArc(z.clockStartH,z.clockEndH);
+          const arcLen=R*arc.spanRad;
+          const cellsL=Math.ceil(z.gridLength/z.pitchL),cellsT=Math.ceil(arcLen/z.pitchT);
+          const rawArea=cellsL*z.pitchL*cellsT*z.pitchT;
+          const td=thermalDataMap&&thermalDataMap[z.id];
+          const hasTd=td&&td.data&&td.data.length>0;
+          const flat=hasTd?td.data.flat():[];
+          const tMin=hasTd?Math.min(...flat):0,tMax=hasTd?Math.max(...flat):0;
+          const tAvg=hasTd?(flat.reduce((a,b)=>a+b,0)/flat.length):0;
+          const thresh=globalMin+.8*(globalMax-globalMin);
+          const hotCount=hasTd?flat.filter(v=>v>=thresh).length:0;
+          return e("tr",{key:z.id,style:{borderBottom:"1px solid #d0d7de"}},
+            e("td",{style:{padding:"7px 6px",fontWeight:700,color:col.hex,whiteSpace:"nowrap"}},e("span",{style:{display:"inline-block",width:9,height:9,borderRadius:"50%",background:col.hex,marginRight:6,verticalAlign:"middle"}}),z.name),
+            e("td",{style:{textAlign:"center",...mono,color:"#32383f"}},u.ln(z.gridStart)),
+            e("td",{style:{textAlign:"center",...mono,color:"#32383f"}},u.ln(z.gridLength)),
+            e("td",{style:{textAlign:"center",...mono,color:"#32383f"}},arc.spanDeg.toFixed(0)+"°"),
+            e("td",{style:{textAlign:"center",...mono,color:"#32383f"}},u.ln(z.pitchL)),
+            e("td",{style:{textAlign:"center",...mono,color:"#32383f"}},u.ln(z.pitchT)),
+            e("td",{style:{textAlign:"center",...mono,fontWeight:700,color:"#32383f"}},cellsL),
+            e("td",{style:{textAlign:"center",...mono,fontWeight:700,color:"#32383f"}},cellsT),
+            e("td",{style:{textAlign:"center",...mono,fontWeight:800,color:col.hex}},cellsL*cellsT),
+            e("td",{style:{textAlign:"center",...mono,color:"#32383f"}},u.an(rawArea)),
+            showThermalCols&&e("td",{style:{textAlign:"center",...mono,color:hasTd?thermalCSS((tMin-globalMin)/(globalMax-globalMin||1)):"#6e7781"}},hasTd?u.tn(tMin):"—"),
+            showThermalCols&&e("td",{style:{textAlign:"center",...mono,color:hasTd?thermalCSS((tMax-globalMin)/(globalMax-globalMin||1)):"#6e7781"}},hasTd?u.tn(tMax):"—"),
+            showThermalCols&&e("td",{style:{textAlign:"center",...mono,color:"#32383f"}},hasTd?u.tn(tAvg):"—"),
+            showThermalCols&&e("td",{style:{textAlign:"center",...mono,fontWeight:800,color:hotCount>0?"#f85149":"#6e7781"}},hasTd?hotCount:"—")
+          );
+        }),
+        (()=>{
+          let totCells=0,totArea=0,allTemps=[];
+          zones.forEach(z=>{const arc=getArc(z.clockStartH,z.clockEndH);const al=R*arc.spanRad;const cl=Math.ceil(z.gridLength/z.pitchL);const ct=Math.ceil(al/z.pitchT);totCells+=cl*ct;totArea+=cl*z.pitchL*ct*z.pitchT;
+            const td=thermalDataMap&&thermalDataMap[z.id];if(td&&td.data)allTemps=allTemps.concat(td.data.flat());
+          });
+          const thresh2=globalMin+.8*(globalMax-globalMin);
+          return e("tr",{style:{background:"#f0f7ff",borderTop:"2px solid #0969da"}},
+            e("td",{colSpan:8,style:{padding:"7px 6px",fontWeight:800,textAlign:"right",color:"#0969da",fontSize:11,letterSpacing:".06em"}},"TOTALS"),
+            e("td",{style:{textAlign:"center",...mono,fontWeight:900,color:"#1a7f37",fontSize:13}},totCells),
+            e("td",{style:{textAlign:"center",...mono,fontWeight:700,color:"#1a7f37"}},u.an(totArea)),
+            showThermalCols&&e("td",{style:{textAlign:"center",...mono,color:"#32383f"}},allTemps.length?u.tn(Math.min(...allTemps)):"—"),
+            showThermalCols&&e("td",{style:{textAlign:"center",...mono,color:"#32383f"}},allTemps.length?u.tn(Math.max(...allTemps)):"—"),
+            showThermalCols&&e("td",{style:{textAlign:"center",...mono,color:"#32383f"}},allTemps.length?u.tn(allTemps.reduce((a,b)=>a+b,0)/allTemps.length):"—"),
+            showThermalCols&&e("td",{style:{textAlign:"center",...mono,fontWeight:800,color:"#f85149"}},allTemps.length?allTemps.filter(v=>v>=thresh2).length:"—")
+          );
+        })()
+      )
+    )
+  );
+}
+
+/* ═══ THERMAL HEATMAP 2D (per zone) ═══ */
+function ZoneHeatmap2D({zone,thermalData,globalMin,globalMax,color,units}){
+  const canvasRef=useRef(null);
+  useEffect(()=>{
+    const cv=canvasRef.current;if(!cv||!thermalData||!thermalData.data||!thermalData.data.length)return;
+    const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;cv.width=w*dpr;cv.height=h*dpr;
+    const ctx=cv.getContext("2d");ctx.scale(dpr,dpr);ctx.clearRect(0,0,w,h);
+    const m={top:25,right:12,bottom:30,left:35};
+    const pw=w-m.left-m.right,ph=h-m.top-m.bottom;
+    const{cellsL:cL,cellsT:cT,data}=thermalData;
+    const cw=pw/cL,ch2=ph/cT;
+    const range=globalMax-globalMin||1;
+    ctx.fillStyle="#f6f8fa";ctx.fillRect(0,0,w,h);
+    for(let r=0;r<cT;r++)for(let c=0;c<cL;c++){
+      const t=(data[r][c]-globalMin)/range;
+      ctx.fillStyle=thermalCSS(Math.max(0,Math.min(1,t)));
+      ctx.fillRect(m.left+c*cw,m.top+r*ch2,cw+.5,ch2+.5);
+    }
+    // grid
+    ctx.strokeStyle="rgba(0,0,0,0.25)";ctx.lineWidth=.3;
+    for(let c=0;c<=cL;c++){ctx.beginPath();ctx.moveTo(m.left+c*cw,m.top);ctx.lineTo(m.left+c*cw,m.top+ph);ctx.stroke()}
+    for(let r=0;r<=cT;r++){ctx.beginPath();ctx.moveTo(m.left,m.top+r*ch2);ctx.lineTo(m.left+pw,m.top+r*ch2);ctx.stroke()}
+    // labels
+    ctx.fillStyle=color.hex;ctx.font="bold 12px 'IBM Plex Sans',sans-serif";ctx.textAlign="left";
+    ctx.fillText(zone.name+" — "+cL+"×"+cT+" grid",m.left,16);
+    ctx.fillStyle="#57606a";ctx.font="10px 'IBM Plex Mono',monospace";ctx.textAlign="center";
+    // x axis labels (every few)
+    const u=units||makeUnits("SI");
+    const stepX=Math.max(1,Math.floor(cL/8));
+    for(let c=0;c<=cL;c+=stepX){ctx.fillText(u.L(zone.gridStart+c*zone.pitchL),m.left+c*cw,m.top+ph+14)}
+    ctx.textAlign="right";
+    const stepY=Math.max(1,Math.floor(cT/6));
+    for(let r=0;r<=cT;r+=stepY){ctx.fillText(zone.clockEndH+"hr+"+u.ln(r*zone.pitchT),m.left-3,m.top+r*ch2+4)}
+    // border
+    ctx.strokeStyle=color.hex;ctx.lineWidth=1.5;ctx.strokeRect(m.left,m.top,pw,ph);
+  },[zone,thermalData,globalMin,globalMax,color,units]);
+  return e("canvas",{ref:canvasRef,style:{width:"100%",height:"100%",display:"block",borderRadius:4}});
+}
+
+/* ═══ SPEC TAB ═══ */
+function SpecTab({zones,diameter,length,specFields,onSpecFieldChange,units}){
+  const[copied,setCopied]=useState(false);
+  const u=units||makeUnits("SI");
+  const R=diameter/2;
+  let totalCells=0;
+  zones.forEach(z=>{const arc=getArc(z.clockStartH,z.clockEndH);const aLen=R*arc.spanRad;totalCells+=Math.max(1,Math.ceil(z.gridLength/z.pitchL))*Math.max(1,Math.ceil(aLen/z.pitchT))});
+  const locStr=zones.map(z=>{const arc=getArc(z.clockStartH,z.clockEndH);return`${z.clockStartH} o'clock to ${z.clockEndH} o'clock (${arc.spanDeg.toFixed(0)}° topside)`}).join('; ');
+  const densityStr=zones.map((z,i)=>{const arc=getArc(z.clockStartH,z.clockEndH);const aLen=R*arc.spanRad;const cL=Math.max(1,Math.ceil(z.gridLength/z.pitchL));const cT=Math.max(1,Math.ceil(aLen/z.pitchT));const rawArea=cL*z.pitchL*cT*z.pitchT;return`Zone ${i+1}: ${u.L(z.pitchL)} x ${u.L(z.pitchT)} grid for ${u.L(z.gridLength)}. Total grids: ${cL*cT}. Area: ~${u.A(rawArea)}.`}).join(' ');
+  const rows=[
+    {param:"Asset Name",key:"assetName",editable:true},
+    {param:"Application",key:"application",editable:true},
+    {param:"Number of sensing points",value:String(totalCells),editable:false},
+    {param:"Number of sensing elements",key:"sensingElements",editable:true},
+    {param:"Clamping Style",key:"clampingStyle",editable:true},
+    {param:"Shell diameter, Length",value:`${u.L(diameter)}, ${u.L(length)}`,editable:false},
+    {param:"Measurement Location",value:locStr,editable:false},
+    {param:"Measurement Density",value:densityStr,editable:false},
+    {param:"Shell MOC",key:"shellMOC",editable:true},
+    {param:"Max skin temperature",key:"maxTemp",editable:true},
+    {param:"Sensor limits",key:"sensorLimit",editable:true},
+    {param:"Flue gas composition",key:"flueGas",editable:true},
+    {param:"GA drawing provided",key:"gaDrawing",editable:true},
+    {param:"Communication",key:"communication",editable:true},
+    {param:"AI Application",key:"aiApp",editable:true},
+  ];
+  const copySpec=()=>{
+    const rowData=rows.map(r=>({param:r.param,value:r.editable?specFields[r.key]:r.value}));
+    const html=`<table style="border-collapse:collapse;width:100%;font-family:Calibri,Arial,sans-serif;font-size:11pt"><thead><tr><th style="border:1px solid #000;padding:6px 10px;background:#dce6f1;font-weight:bold;text-align:left;width:35%">Parameter</th><th style="border:1px solid #000;padding:6px 10px;background:#dce6f1;font-weight:bold;text-align:left">Specifications / Requirements</th></tr></thead><tbody>${rowData.map((r,i)=>`<tr style="background:${i%2===0?'#ffffff':'#f2f7fc'}"><td style="border:1px solid #bfbfbf;padding:6px 10px;font-weight:600;vertical-align:top">${r.param}</td><td style="border:1px solid #bfbfbf;padding:6px 10px;vertical-align:top">${r.value.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br/>')}</td></tr>`).join('')}</tbody></table>`;
+    const text=rowData.map(r=>`${r.param}\t${r.value}`).join('\n');
+    try{
+      const item=new ClipboardItem({'text/html':new Blob([html],{type:'text/html'}),'text/plain':new Blob([text],{type:'text/plain'})});
+      navigator.clipboard.write([item]).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2500)});
+    }catch(err){
+      navigator.clipboard.writeText(text).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2500)});
+    }
+  };
+  return e("div",{style:{width:"100%",height:"100%",overflowY:"auto",padding:"20px 24px"}},
+    e("div",{style:{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:16,gap:16}},
+      e("div",null,
+        e("div",{style:{fontSize:16,fontWeight:700,color:"#1f2328",letterSpacing:".04em",textTransform:"uppercase",marginBottom:4}},"General Specification"),
+        e("div",{style:{fontSize:12,color:"#57606a"}},"Blue values auto-computed from current vessel config. Click white fields to edit.")
+      ),
+      e("button",{onClick:copySpec,style:{padding:"9px 20px",fontSize:12,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em",background:copied?"#1a7f37":"#0969da",color:"#fff",border:"none",borderRadius:6,cursor:"pointer",transition:"background .2s",whiteSpace:"nowrap",boxShadow:"0 1px 4px rgba(0,0,0,.15)"}},copied?"✓ Copied to Word!":"⎘ Copy to Clipboard")
+    ),
+    e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:13,boxShadow:"0 1px 4px rgba(0,0,0,.07)",borderRadius:8,overflow:"hidden"}},
+      e("thead",null,
+        e("tr",{style:{background:"#0969da"}},
+          e("th",{style:{padding:"11px 16px",fontWeight:700,color:"#ffffff",textAlign:"left",width:"32%",fontSize:11,letterSpacing:".08em",textTransform:"uppercase"}},"Parameter"),
+          e("th",{style:{padding:"11px 16px",fontWeight:700,color:"#ffffff",textAlign:"left",fontSize:11,letterSpacing:".08em",textTransform:"uppercase"}},"Specifications / Requirements")
+        )
+      ),
+      e("tbody",null,
+        rows.map((row,i)=>e("tr",{key:i,style:{borderBottom:"1px solid #d0d7de",background:i%2===0?"#ffffff":"#f6f8fa"}},
+          e("td",{style:{padding:"10px 16px",fontWeight:600,color:"#57606a",verticalAlign:"top",fontSize:12,whiteSpace:"nowrap",borderRight:"1px solid #d0d7de"}},row.param),
+          e("td",{style:{padding:"6px 12px",verticalAlign:"top"}},
+            row.editable
+              ?e("textarea",{value:specFields[row.key],onChange:ev=>onSpecFieldChange(row.key,ev.target.value),rows:row.key==="application"?3:1,style:{width:"100%",background:"transparent",border:"1px solid transparent",color:"#1f2328",fontSize:13,fontFamily:"'IBM Plex Sans',sans-serif",resize:"vertical",padding:"4px 8px",borderRadius:4,outline:"none",lineHeight:1.6,boxSizing:"border-box",minHeight:32,transition:"border-color .15s"},onFocus:ev=>{ev.target.style.borderColor="#0969da";ev.target.style.background="#f0f7ff"},onBlur:ev=>{ev.target.style.borderColor="transparent";ev.target.style.background="transparent"}})
+              :e("span",{style:{color:"#0969da",fontFamily:"'IBM Plex Mono',monospace",fontSize:13,lineHeight:1.6,display:"block",padding:"4px 8px",fontWeight:500}},row.value)
+          )
+        ))
+      )
+    )
+  );
+}
+
+/* ═══ TABS ═══ */
+function TabBar({tabs,active,onChange,showSidebar,onToggleSidebar}){
+  return e("div",{style:{display:"flex",alignItems:"stretch",background:"#ffffff",borderBottom:"2px solid #d0d7de",padding:"0 14px",minHeight:48}},
+    e("button",{onClick:onToggleSidebar,style:{alignSelf:"center",padding:"6px 13px",fontSize:11,fontWeight:600,color:"#0969da",background:"#f0f7ff",border:"1px solid #cce0ff",borderRadius:6,cursor:"pointer",marginRight:18,whiteSpace:"nowrap",letterSpacing:".02em"}}, showSidebar?"◀ Hide":"▶ Show"),
+    tabs.map(t=>e("button",{key:t.id,onClick:()=>onChange(t.id),style:{
+      padding:"0 18px",fontSize:12,fontWeight:active===t.id?700:500,
+      letterSpacing:".05em",color:active===t.id?"#0969da":"#57606a",
+      background:"transparent",border:"none",
+      borderBottom:active===t.id?"3px solid #0969da":"3px solid transparent",
+      cursor:"pointer",textTransform:"uppercase",
+      transition:"color .15s, border-color .15s",
+      marginBottom:"-2px"
+    }},t.icon+" "+t.label)),
+    e("span",{style:{marginLeft:"auto",alignSelf:"center",paddingRight:4}},
+      e("span",{style:{fontSize:10,fontFamily:"'IBM Plex Mono',monospace",fontWeight:600,color:"#ffffff",background:"#0969da",padding:"2px 8px",borderRadius:10,letterSpacing:".06em"}},"v"+APP_VERSION)
+    )
+  );
+}
+
+/* ═══ APP ═══ */
+function App(){
+  const[length,setLength]=useState(12);
+  const[diameter,setDiameter]=useState(3.4);
+  const[zones,setZones]=useState([
+    makeZone({name:"Zone 1",gridStart:0.5,gridLength:10.5,clockStartH:10,clockEndH:2,pitchL:0.5,pitchT:0.5})
+  ]);
+  const[expanded,setExpanded]=useState(zones[0]?zones[0].id:null);
+
+  const applyPreset=(type)=>{
+    if(type==="proposal"){
+      setLength(12);
+      setDiameter(3.4);
+      const z = makeZone({name:"Zone 1",gridStart:0.5,gridLength:10.5,clockStartH:10,clockEndH:2,pitchL:0.5,pitchT:0.5});
+      setZones([z]);
+      setExpanded(z.id);
+    } else if(type==="generator"){
+      setLength(6.6);
+      setDiameter(2.2);
+      const z = makeZone({name:"Zone 2",gridStart:0.5,gridLength:5.5,clockStartH:10,clockEndH:2,pitchL:0.5,pitchT:0.5});
+      setZones([z]);
+      setExpanded(z.id);
+    } else if(type==="demo"){
+      setLength(10);
+      setDiameter(2.2);
+      const z1 = makeZone({name:"Zone 1",gridStart:1,gridLength:3,clockStartH:10,clockEndH:2,pitchL:0.3,pitchT:0.3});
+      const z2 = makeZone({name:"Zone 2",gridStart:5,gridLength:3,clockStartH:8,clockEndH:4,pitchL:0.5,pitchT:0.4});
+      setZones([z1, z2]);
+      setExpanded(z1.id);
+    }
+    setThermalDataMap({});
+    setShowThermal(false);
+  };
+  const[activeTab,setActiveTab]=useState("3d");
+  const[showSidebar,setShowSidebar]=useState(true);
+  const[thermalDataMap,setThermalDataMap]=useState({});
+  const[showThermal,setShowThermal]=useState(false);
+  // thermal generation options
+  const[genBaseTemp,setGenBaseTemp]=useState(120);
+  const[genVariance,setGenVariance]=useState(15);
+  const[genHotspots,setGenHotspots]=useState(3);
+  const[genHotIntensity,setGenHotIntensity]=useState(60);
+  const[genHotRadius,setGenHotRadius]=useState(2.5);
+  const[genColdspots,setGenColdspots]=useState(1);
+  const[genColdIntensity,setGenColdIntensity]=useState(30);
+  const[genProfile,setGenProfile]=useState("normal");
+  const[lastGenTime,setLastGenTime]=useState(null);
+  const[showThermalCols,setShowThermalCols]=useState(false);
+  const[specFields,setSpecFields]=useState({assetName:"Reducing Gas Generator",application:"Multi-Point Real-Time Continuous Outer Skin Temperature Monitoring using Ultrasonic waveguide for REDUCING GAS GENERATOR",sensingElements:"As required",clampingStyle:"Steel rope, strap on",shellMOC:"SA-516 Gr. 70N NACE (Ferromagnetic)",maxTemp:"345°C",sensorLimit:"Sensor shall withstand temperature upto 1050°C",flueGas:"-NA-",gaDrawing:"Yes",communication:"Modbus / IIoT",aiApp:"Needed, Thermal Mapping and AI predictions"});
+  const onSpecFieldChange=(key,val)=>setSpecFields(f=>({...f,[key]:val}));
+  const[unitSystem,setUnitSystem]=useState("SI");
+  const units=useMemo(()=>makeUnits(unitSystem),[unitSystem]);
+
+  const R=diameter/2;
+  const updateZone=(id,nz)=>setZones(zs=>zs.map(z=>z.id===id?nz:z));
+  const removeZone=id=>{setZones(zs=>zs.filter(z=>z.id!==id));setThermalDataMap(m=>{const n={...m};delete n[id];return n})};
+  const addZone=()=>{const nz=makeZone({name:"Zone "+(zones.length+1)});setZones(zs=>[...zs,nz]);setExpanded(nz.id)};
+
+  const generateAll=useCallback(()=>{
+    const profiles={
+      normal:{base:genBaseTemp,var:genVariance,hs:genHotspots,hi:genHotIntensity,hr:genHotRadius,cs:genColdspots,ci:genColdIntensity},
+      furnace:{base:280,var:30,hs:5,hi:120,hr:3,cs:1,ci:20},
+      cryo:{base:-40,var:10,hs:2,hi:30,hr:2,cs:4,ci:50},
+      gradient:{base:100,var:8,hs:1,hi:80,hr:5,cs:1,ci:40},
+      uniform:{base:genBaseTemp,var:3,hs:0,hi:0,hr:1,cs:0,ci:0},
+    };
+    const p=genProfile==="normal"?profiles.normal:profiles[genProfile];
+    const opts={baseTemp:p.base,variance:p.var,hotspotCount:p.hs,hotspotIntensity:p.hi,hotspotRadius:p.hr,coldspotCount:p.cs,coldspotIntensity:p.ci};
+    const map={};
+    zones.forEach(z=>{map[z.id]=generateThermalData(z,opts,diameter)});
+    setThermalDataMap(map);setShowThermal(true);
+    setLastGenTime(new Date().toLocaleTimeString());
+  },[zones,diameter,genBaseTemp,genVariance,genHotspots,genHotIntensity,genHotRadius,genColdspots,genColdIntensity,genProfile]);
+
+  const clearThermal=()=>{setThermalDataMap({});setShowThermal(false);setLastGenTime(null)};
+
+  // global min/max
+  let globalMin=Infinity,globalMax=-Infinity;
+  Object.values(thermalDataMap).forEach(td=>{if(td&&td.data){const fl=td.data.flat();globalMin=Math.min(globalMin,...fl);globalMax=Math.max(globalMax,...fl)}});
+  if(!isFinite(globalMin)){globalMin=0;globalMax=100}
+
+  const vesselParams=useMemo(()=>({length,diameter,zones,headDepth:R*.4,thermalDataMap,globalMin,globalMax,showThermal,units}),[length,diameter,zones,R,thermalDataMap,globalMin,globalMax,showThermal,units]);
+
+  const tabs=[
+    {id:"3d",icon:"◎",label:"3D Vessel"},
+    {id:"rollout",icon:"▤",label:"Rollout"},
+    {id:"heatmap",icon:"◨",label:"Zone Heatmaps"},
+    {id:"data",icon:"≡",label:"Grid Data"},
+    {id:"spec",icon:"◈",label:"Spec"},
+  ];
+
+  return e("div",{style:{width:"100%",height:"100vh",display:"flex",overflow:"hidden",background:"#f6f8fa"}},
+    // LEFT PANEL (Collapsible sidebar)
+    showSidebar && e("div",{style:{width:300,minWidth:300,height:"100%",background:"#f6f8fa",borderRight:"1px solid #d0d7de",display:"flex",flexDirection:"column"}},
+      // header
+      e("div",{style:{padding:"14px 16px",borderBottom:"1px solid #d0d7de",background:"linear-gradient(135deg,#f0f7ff,#ffffff)"}},
+        e("div",{style:{display:"flex",alignItems:"center",gap:9,marginBottom:4}},
+          e("div",{style:{width:10,height:10,borderRadius:"50%",background:showThermal?"#f85149":"#1a7f37",boxShadow:showThermal?"0 0 8px rgba(248,81,73,.5)":"0 0 8px rgba(26,127,55,.5)",flexShrink:0}}),
+          e("span",{style:{fontSize:14,fontWeight:700,letterSpacing:".04em",textTransform:"uppercase",color:"#1f2328"}},showThermal?"Thermal Active":"Thermal Mapping")
+        ),
+        e("div",{style:{fontSize:11,color:"#57606a",paddingLeft:19}},lastGenTime?"Last scan: "+lastGenTime:"No thermal data loaded")
+      ),
+      // scrollable
+      e("div",{style:{flex:1,overflowY:"auto",padding:"10px 14px"}},
+        e(SectionHead,{icon:"◎",text:"Vessel"}),
+        e(Slider,{label:"Shell Length",value:length*units.lf,min:2*units.lf,max:20*units.lf,step:.5*units.lf,unit:" "+units.ls,onChange:v=>setLength(units.fL(v)),ftIn:units.ftIn}),
+        e(Slider,{label:"Shell Diameter",value:diameter*units.lf,min:.5*units.lf,max:10*units.lf,step:.1*units.lf,unit:" "+units.ls,onChange:v=>setDiameter(units.fL(v)),ftIn:units.ftIn}),
+        e("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:10}},
+          e("span",{style:{fontSize:11,fontWeight:600,color:"#57606a",textTransform:"uppercase",letterSpacing:".04em",flex:1}},"Unit System"),
+          e("select",{value:unitSystem,onChange:ev=>setUnitSystem(ev.target.value),style:{flex:"none"}},
+            Object.entries(UNIT_SYSTEMS).map(([k,v])=>e("option",{key:k,value:k},v.name))
+          )
+        ),
+
+        e(SectionHead,{icon:"⚙",text:"Presets"}),
+        e("div",{style:{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}},
+          e("button",{onClick:()=>applyPreset("proposal"),style:{padding:"6px 11px",fontSize:11,fontWeight:600,background:"#ffffff",border:"1px solid #cce0ff",borderRadius:5,color:"#0969da",cursor:"pointer",boxShadow:"0 1px 2px rgba(0,0,0,.05)"}},"Proposal Spec"),
+          e("button",{onClick:()=>applyPreset("generator"),style:{padding:"6px 11px",fontSize:11,fontWeight:600,background:"#ffffff",border:"1px solid #cce0ff",borderRadius:5,color:"#0969da",cursor:"pointer",boxShadow:"0 1px 2px rgba(0,0,0,.05)"}},"Generator Spec"),
+          e("button",{onClick:()=>applyPreset("demo"),style:{padding:"6px 11px",fontSize:11,fontWeight:600,background:"#ffffff",border:"1px solid #cce0ff",borderRadius:5,color:"#0969da",cursor:"pointer",boxShadow:"0 1px 2px rgba(0,0,0,.05)"}},"Multi-Zone Demo")
+        ),
+
+        // zones
+        e(SectionHead,{icon:"▦",text:"Zones ("+zones.length+")",right:e("button",{onClick:addZone,style:{fontSize:15,fontWeight:700,background:"#0969da",border:"none",borderRadius:5,color:"#ffffff",cursor:"pointer",width:26,height:26,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,boxShadow:"0 1px 4px rgba(9,105,218,.3)"}},"+") }),
+        zones.map((z,zi)=>e(ZoneEditor,{key:z.id,zone:z,index:zi,color:ZONE_COLORS[zi%ZONE_COLORS.length],onChange:nz=>updateZone(z.id,nz),onRemove:()=>removeZone(z.id),isExpanded:expanded===z.id,onToggle:()=>setExpanded(expanded===z.id?null:z.id),vesselLength:length,units})),
+
+        // THERMAL GENERATOR
+        e(SectionHead,{icon:"🌡",text:"Thermal Generator"}),
+        e("div",{style:{marginBottom:6}},
+          e("label",{style:{fontSize:11,color:"#57606a",fontWeight:600,textTransform:"uppercase",letterSpacing:".05em",display:"block",marginBottom:5}},"Profile"),
+          e("select",{value:genProfile,onChange:ev=>setGenProfile(ev.target.value),style:{width:"100%"}},
+            e("option",{value:"normal"},"Custom / Normal"),
+            e("option",{value:"furnace"},"Furnace (High Temp)"),
+            e("option",{value:"cryo"},"Cryogenic (Low Temp)"),
+            e("option",{value:"gradient"},"Gradient Pattern"),
+            e("option",{value:"uniform"},"Uniform (Minimal Variation)")
+          )
+        ),
+        genProfile==="normal"&&e(React.Fragment,null,
+          e(Slider,{label:"Base Temperature",value:genBaseTemp*units.tf+units.to,min:-50*units.tf+units.to,max:400*units.tf+units.to,step:5*units.tf,unit:" "+units.ts,onChange:v=>setGenBaseTemp(units.fT(v)),accent:"#f0883e"}),
+          e(Slider,{label:"Background Variance",value:genVariance*units.tf,min:1*units.tf,max:50*units.tf,step:1*units.tf,unit:" "+units.ts,onChange:v=>setGenVariance(units.fdT(v)),accent:"#f0883e"}),
+          e("div",{style:{display:"flex",gap:6}},
+            e("div",{style:{flex:1}},e(Slider,{label:"Hotspot Count",value:genHotspots,min:0,max:10,step:1,unit:"",onChange:setGenHotspots,accent:"#f85149"})),
+            e("div",{style:{flex:1}},e(Slider,{label:"Hotspot Intensity",value:genHotIntensity*units.tf,min:5*units.tf,max:150*units.tf,step:5*units.tf,unit:" "+units.ts,onChange:v=>setGenHotIntensity(units.fdT(v)),accent:"#f85149"}))
+          ),
+          e(Slider,{label:"Hotspot Radius (cells)",value:genHotRadius,min:.5,max:6,step:.5,unit:"",onChange:setGenHotRadius,accent:"#f85149"}),
+          e("div",{style:{display:"flex",gap:6}},
+            e("div",{style:{flex:1}},e(Slider,{label:"Coldspot Count",value:genColdspots,min:0,max:5,step:1,unit:"",onChange:setGenColdspots,accent:"#0969da"})),
+            e("div",{style:{flex:1}},e(Slider,{label:"Cold Intensity",value:genColdIntensity*units.tf,min:5*units.tf,max:80*units.tf,step:5*units.tf,unit:" "+units.ts,onChange:v=>setGenColdIntensity(units.fdT(v)),accent:"#0969da"}))
+          )
+        ),
+        e("div",{style:{display:"flex",gap:6,marginTop:12}},
+          e("button",{onClick:generateAll,style:{flex:1,padding:"10px",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",background:"linear-gradient(135deg,#f85149,#f0883e)",color:"#fff",border:"none",borderRadius:6,cursor:"pointer",boxShadow:"0 2px 6px rgba(248,81,73,.3)"}},"⚡ Generate Thermal"),
+          showThermal&&e("button",{onClick:clearThermal,style:{padding:"10px 14px",fontSize:12,fontWeight:600,textTransform:"uppercase",background:"#ffffff",color:"#57606a",border:"1px solid #d0d7de",borderRadius:6,cursor:"pointer"}},"Clear")
+        ),
+        e("div",{onClick:()=>setShowThermalCols(v=>!v),style:{display:"flex",alignItems:"center",gap:8,marginTop:10,padding:"7px 10px",borderRadius:6,border:"1px solid #d0d7de",background:showThermalCols?"#f0f7ff":"#ffffff",cursor:"pointer",userSelect:"none"}},
+          e("div",{style:{width:32,height:18,borderRadius:9,background:showThermalCols?"#0969da":"#d0d7de",position:"relative",transition:"background .2s",flexShrink:0}},
+            e("div",{style:{position:"absolute",top:2,left:showThermalCols?14:2,width:14,height:14,borderRadius:"50%",background:"#ffffff",transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.2)"}})
+          ),
+          e("span",{style:{fontSize:11,fontWeight:500,color:showThermalCols?"#0969da":"#57606a"}},"Show temperature data in table")
+        ),
+        showThermal&&e("div",{style:{marginTop:8}},
+          e(ThermalLegend,{min:globalMin,max:globalMax,units}),
+          e("div",{style:{display:"flex",gap:8,marginTop:4,flexWrap:"wrap"}},
+            e("div",{style:{background:"#ffffff",borderRadius:6,padding:"7px 10px",border:"1px solid #d0d7de",flex:1,boxShadow:"0 1px 3px rgba(0,0,0,.05)"}},
+              e("div",{style:{fontSize:10,color:"#57606a",fontWeight:600,textTransform:"uppercase",letterSpacing:".05em",marginBottom:2}},"Global Min"),
+              e("div",{style:{fontSize:15,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",color:thermalCSS(0)}},units.T(globalMin))
+            ),
+            e("div",{style:{background:"#ffffff",borderRadius:6,padding:"7px 10px",border:"1px solid #d0d7de",flex:1,boxShadow:"0 1px 3px rgba(0,0,0,.05)"}},
+              e("div",{style:{fontSize:10,color:"#57606a",fontWeight:600,textTransform:"uppercase",letterSpacing:".05em",marginBottom:2}},"Global Max"),
+              e("div",{style:{fontSize:15,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",color:thermalCSS(1)}},units.T(globalMax))
+            ),
+            e("div",{style:{background:"#ffffff",borderRadius:6,padding:"7px 10px",border:"1px solid #d0d7de",flex:1,boxShadow:"0 1px 3px rgba(0,0,0,.05)"}},
+              e("div",{style:{fontSize:10,color:"#57606a",fontWeight:600,textTransform:"uppercase",letterSpacing:".05em",marginBottom:2}},"Range"),
+              e("div",{style:{fontSize:15,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",color:"#1f2328"}},units.dT(globalMax-globalMin))
+            )
+          )
+        ),
+
+        // vessel info
+        e(SectionHead,{icon:"≡",text:"Vessel Info"}),
+        e(InfoRow,{label:"Circumference",value:units.L(Math.PI*diameter)}),
+        e(InfoRow,{label:"Zones",value:String(zones.length)})
+      )
+    ),
+    // RIGHT: tabbed views
+    e("div",{style:{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}},
+      e(TabBar,{tabs,active:activeTab,onChange:setActiveTab,showSidebar,onToggleSidebar:()=>setShowSidebar(!showSidebar)}),
+      // tab content
+      e("div",{style:{flex:1,position:"relative",overflow:"hidden"}},
+        activeTab==="3d"&&e("div",{style:{width:"100%",height:"100%",display:"flex",flexDirection:"column",overflow:"hidden"}},
+          // Top section split side-by-side
+          e("div",{style:{flex:1,display:"flex",minHeight:0,borderBottom:"1px solid #21262d"}},
+            // Left: 3D View
+            e("div",{style:{flex:1,position:"relative",borderRight:"1px solid #21262d"}},
+              e("div",{style:{position:"absolute",top:8,left:10,zIndex:5,display:"flex",gap:6,alignItems:"center"}},
+                e("div",{style:{fontSize:12,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase",color:"#1f2328",background:"rgba(255,255,255,.94)",padding:"5px 12px",borderRadius:6,border:"1px solid #d0d7de",boxShadow:"0 1px 4px rgba(0,0,0,.08)"}},"👁 "+specFields.assetName),
+                showThermal&&e("div",{style:{background:"rgba(255,255,255,.9)",padding:"3px 8px",borderRadius:4,border:"1px solid #30363d"}},e(ThermalLegend,{min:globalMin,max:globalMax,units}))
+              ),
+              e(ThreeCanvas,{buildFn:buildVessel,params:vesselParams,orbit:{theta:Math.PI*.22,phi:Math.PI*.28,radius:8,target:[length/2,0,0]},style:{width:"100%",height:"100%",display:"block"}})
+            ),
+            // Right: Rollout 2D
+            e("div",{style:{flex:1,position:"relative"}},
+              e(Rollout2D,{length,diameter,zones,thermalDataMap,globalMin,globalMax,showThermal})
+            )
+          ),
+          // Bottom section: Measurement Grid Details Table
+          e("div",{style:{height:240,minHeight:240,overflowY:"auto",background:"#f6f8fa"}},
+            e("div",{style:{background:"#f0f7ff",borderTop:"2px solid #d0d7de",borderBottom:"1px solid #d0d7de",padding:"8px 16px",fontSize:11,fontWeight:700,color:"#0969da",letterSpacing:".07em",textTransform:"uppercase"}},"■ Measurement Grid Details"),
+            e("div",{style:{padding:"8px 12px"}},
+              e(GridDetailsTable,{zones,diameter,thermalDataMap,globalMin,globalMax,showThermalCols,units})
+            )
+          )
+        ),
+        activeTab==="rollout"&&e(Rollout2D,{length,diameter,zones,thermalDataMap,globalMin,globalMax,showThermal}),
+        activeTab==="heatmap"&&e("div",{style:{width:"100%",height:"100%",overflowY:"auto",padding:12,display:"grid",gridTemplateColumns:zones.length===1?"1fr":"1fr 1fr",gap:10}},
+          zones.map((z,zi)=>{
+            const td=thermalDataMap[z.id];
+            const col=ZONE_COLORS[zi%ZONE_COLORS.length];
+            return e("div",{key:z.id,style:{background:"#ffffff",borderRadius:6,border:"1px solid #21262d",overflow:"hidden",minHeight:220}},
+              td&&td.data&&td.data.length>0
+                ? e(ZoneHeatmap2D,{zone:z,thermalData:td,globalMin,globalMax,color:col,units})
+                : e("div",{style:{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"#6e7781",fontSize:11}},
+                    e("div",{style:{textAlign:"center"}},
+                      e("div",{style:{fontSize:20,marginBottom:6}},"🌡"),
+                      e("div",null,"No thermal data for ",e("b",{style:{color:col.hex}},z.name)),
+                      e("div",{style:{fontSize:9,marginTop:4}},"Generate thermal data from the left panel")
+                    )
+                  )
+            )
+          })
+        ),
+        activeTab==="data"&&e("div",{style:{width:"100%",height:"100%",overflowY:"auto",padding:12}},
+          e("div",{style:{fontSize:14,fontWeight:700,color:"#1f2328",marginBottom:10,letterSpacing:".02em"}},"▦ Measurement Grid Summary"),
+          showThermal&&e("div",{style:{marginBottom:10}},e(ThermalLegend,{min:globalMin,max:globalMax,units})),
+          e(GridDetailsTable,{zones,diameter,thermalDataMap,globalMin,globalMax,showThermalCols,units})
+        ),
+        activeTab==="spec"&&e(SpecTab,{zones,diameter,length,specFields,onSpecFieldChange,units})
+      )
+    )
+  );
+}
+
+ReactDOM.render(e(App),document.getElementById("root"));
+</script>
+</body>
+</html>

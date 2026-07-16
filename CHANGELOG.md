@@ -1,0 +1,97 @@
+# Changelog — Vessel Thermal Mapping Dashboard
+
+All notable changes to `vessel-multi-zone V3.html` are documented here.  
+Format: `[vX.Y.Z] — YYYY-MM-DD`  
+- **X** = major (architecture / breaking rework)  
+- **Y** = minor (new feature or significant enhancement)  
+- **Z** = patch (bug fix, small tweak)
+
+---
+
+## [v3.4.0] — 2026-07-16
+
+### Added
+- **Manual entry on all sliders** — value display replaced with an inline editable text field. Click to focus, type a value, press Enter or click away to apply. Escape cancels. Value is clamped to slider min/max.
+- **Feet + Inches compound input for Imperial** — when unit system is set to *Imperial (ft, °F)*, every length slider shows separate `ft` and `in` fields (0–11 in) instead of decimal feet. Applies to: Shell Length, Shell Diameter, Zone Start Pos, Grid Length, Pitch L, Pitch T.
+- **Version constant** (`APP_VERSION`) in script for programmatic access.
+- **Version badge** (`v3.4.0`) displayed in the tab bar (top-right), always visible.
+- **This CHANGELOG** document created.
+
+---
+
+## [v3.3.0] — 2026-07-16
+
+### Added
+- **Multi-system unit support** — dropdown in sidebar (under Vessel) to switch between:
+  - SI (m, °C) — default
+  - MKS (m, °C) — same as SI
+  - CGS (cm, °C)
+  - Imperial / USCS (ft, °F)
+  - Workshop (mm, °C)
+- All displayed values convert live: sliders (min/max/step/value), Grid Details Table headers and cells, Spec tab auto-computed rows, Thermal Legend, Global Min/Max/Range, 3D tooltip, Zone Heatmap 2D axis labels.
+- Internal state always stored in SI (m, °C); unit conversion applied only at display layer.
+
+---
+
+## [v3.2.0] — 2026-07-02
+
+### Added
+- **Toggle switch** — "Show temperature data in table" under the Thermal Generator section. Thermal columns (Min, Max, Avg °C, Hotspots) hidden by default; revealed on toggle.
+- **Asset Name** as first row in Spec tab — manual editable field. The 3D view badge (`👁 ...`) reflects the live value.
+
+### Changed
+- Cell count rounding changed from `Math.floor` / `Math.round` → **`Math.ceil`** throughout (grid generation, 3D build, 2D rollout, heatmap, table). Partial cells are always rounded up to match proposal totals.
+- Grid area formula changed from geometric arc × length → **cell-based**: `cellsL × pitchL × cellsT × pitchT`. Totals row updated accordingly.
+- Thermal data no longer pre-seeded on load; table shows "—" until Generate is clicked.
+
+---
+
+## [v3.1.0] — 2026-06-25
+
+### Added
+- **Spec tab** (`◈ Spec`) — General Specification table with auto-computed rows (sensing points, diameter/length, measurement location, density) and editable rows for all other parameters (application, clamping style, MOC, max temp, sensor limits, etc.).
+- **Copy to Clipboard** button — writes both `text/html` (Word-compatible table with formatting) and `text/plain` (tab-separated) to the clipboard simultaneously via `ClipboardItem` API.
+- **Presets menu** — "Proposal Spec", "Generator Spec", "Multi-Zone Demo" buttons to load pre-configured vessel and zone layouts.
+- **Collapsible sidebar** — "◀ Hide / ▶ Show" toggle button in the tab bar.
+
+### Changed
+- Full switch to **light theme**: `#f6f8fa` background, `#ffffff` panels, `#0969da` accent, `#1f2328` primary text.
+- Fonts upgraded to **IBM Plex Sans** (UI) and **IBM Plex Mono** (values/code) via Google Fonts CDN.
+- Three.js renderer clear color updated to `0xf6f8fa`; grid and shell opacity adjusted for light background.
+- ClockSelector enlarged (`sz=168`, `r=65`).
+- SectionHead redesigned with 3px blue left-bar accent.
+
+---
+
+## [v3.0.0] — 2026-06-18
+
+### Initial V3 Release
+
+**Core features:**
+- **3D interactive vessel model** — `THREE.MeshPhysicalMaterial` shell, hemispherical heads, saddle supports, nozzles. Custom `useOrbit` hook for mouse/touch orbit controls.
+- **Vertex-colored BufferGeometry** — single draw call per zone for thermal overlay (replaces per-cell mesh approach). Significant WebGL performance improvement.
+- **Raycasting tooltip** — `THREE.Raycaster` on mousemove detects zone cells; shows zone name, longitudinal position, clock position, grid cell index, and temperature.
+- **2D Surface Rollout** — HTML5 Canvas; cylinder unwrapped with 12 o'clock at center, zones color-coded or thermally overlaid.
+- **Zone Heatmap 2D** — per-zone canvas heatmap with positional axis labels.
+- **Grid Details Table** — zone-by-zone summary: start, length, arc, pitches, cell counts, area, thermal stats.
+- **Multi-Zone Editor** — add/remove zones, each with: Start Pos, Grid Length, arc range (ClockSelector SVG widget), Pitch L/T sliders.
+- **Thermal Simulator** — profiles (Normal/Furnace/Cryogenic/Gradient/Uniform); Gaussian hotspot/coldspot injection; 5-point box-blur smoothing pass.
+- **Thermal Legend** — 8-stop color gradient from cold (dark blue) to extreme (hot pink/white).
+- **Split layout** — 3D view + 2D rollout side by side, Grid Details Table anchored at bottom.
+
+**Tech stack:** React 18 + Three.js r128 + Babel-Standalone (all CDN). Single `.html` file, no build step.
+
+---
+
+## Versioning Policy
+
+| Increment | When to use |
+|:----------|:------------|
+| **Patch** (Z) | Bug fix, label change, style tweak, no new controls |
+| **Minor** (Y) | New feature, new panel/tab, new mode that doesn't break existing configs |
+| **Major** (X) | Architecture rework, breaking state changes, rename of the file |
+
+To release a new version:
+1. Update `APP_VERSION` constant in the `<script>` block.
+2. Update `<title>` tag in `<head>`.
+3. Add a new entry to the top of this CHANGELOG (below the `---` separator after the header).
