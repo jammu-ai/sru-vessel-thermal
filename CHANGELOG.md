@@ -8,6 +8,21 @@ Format: `[vX.Y.Z] — YYYY-MM-DD`
 
 ---
 
+## [v3.6.0] — 2026-07-17
+
+### Added
+- **Help tab (`? Help`)** — in-app reference guide covering:
+  - Quick Start: 4-step numbered workflow
+  - 3D View mouse controls (orbit, zoom, pan, tooltip)
+  - All five views explained (3D, Rollout, Heatmaps, Grid Data, Spec)
+  - Zone parameter definitions (Start Pos, Grid Length, Clock Arc, Pitch L/T)
+  - Thermal Generator controls and profile descriptions
+  - Unit system table (SI/MKS, CGS, Imperial, Workshop)
+  - Presets reference (what each preset configures)
+  - Import/Export behaviour
+
+---
+
 ## [v3.5.0] — 2026-07-16
 
 ### Added
