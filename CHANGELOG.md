@@ -8,15 +8,81 @@ Format: `[vX.Y.Z] — YYYY-MM-DD`
 
 ---
 
+## [v3.16.0] — 2026-08-26
+
+### Added
+- **Accurate 3D Curved Surface Area Calculation for Dished Head Grids** — Added `computeHeadGridArea(end, diameter, zones, idx)` to integrate the 3D surface area cell-by-cell over all active dished head grid tiles ($A_{\text{grid, 3D}} = \sum P_{grid}^2 \sqrt{1 + \frac{H^2 r_c^2}{R^4(1-r_c^2/R^2)}}$). Updated the `Measurement Density` row in `SpecTab` to display the exact 3D grid surface area covered under the measurement tiles alongside plan-view grid area and grid count.
+
+## [v3.15.0] — 2026-08-26
+
+### Added
+- **Enriched Spec Table Location & Density Rows** — Restored the classic 15-row General Specification Table (`SpecTab`) parameter layout while integrating full dished head details (Front/Rear head grid tile size, cell counts, surface area $A_{head}$, crown depth $H_f, H_r$, and clock arc range) directly into the `Measurement Location` and `Measurement Density` parameter rows.
+
+## [v3.14.0] — 2026-08-26
+
+### Added
+- **3D/Canvas Rollout 12 o'clock Center Alignment** — Updated `Rollout2D` (the canvas 2D rollout view used in the Rollout tab and 3D View side panel) to align 12 o'clock ($0^\circ$, vessel top center) to the **exact vertical center** of the unrolled rollout strip ($Y = yMid$), with 6 o'clock ($180^\circ$) at the top and bottom split seams.
+- **Canvas Rollout 1:1 Square Grid Scaling** — Equalized axial and circumferential scale factors in `Rollout2D` so $300\text{mm} \times 300\text{mm}$ grid cells render as **true 1:1 squares** across both shell zones and dished head surface elevation curves.
+
+## [v3.13.0] — 2026-08-26
+
+### Added
+- **Uniform 1:1 Aspect Scale Grid Alignment** — Equalized the pixels-per-metre scale factors along both the axial X-axis ($\text{scaleX}$) and circumferential Y-axis ($\text{scaleY}$) in `SurfaceRolloutSchematic` and `Rollout2D`. Square grid cells ($300\text{mm} \times 300\text{mm}$) now render with true 1:1 square proportions across both the unrolled cylindrical shell plate strip and the dished head disc diagrams, eliminating aspect ratio stretching.
+
+## [v3.12.0] — 2026-08-26
+
+### Added
+- **Default Dished Head Grid Activation** — Enabled dished head grids by default (`gridEnabled: true`) with $300\text{mm} \times 300\text{mm}$ pitch for Front and Rear dished heads, ensuring measurement grids are automatically displayed across 3D views, 2D rollout schematics, and drawing sheets.
+- **Specification Table Dished Head Details** — Updated `SpecTab` (General Specification Table) to auto-calculate and display Front Head ($H_f$), Rear Head ($H_r$), and overall vessel length ($OAL$) details, including shell cells, dished head cells, and total asset sensing points.
+
+### Fixed
+- **3D Surface Rollout Grid Mesh Offset** — Optimized `GRID_OFF` offset and line material opacity in `buildVessel`, eliminating Z-fighting and ensuring 3D dished head surface grids sit crisply over the dome meshes.
+
+## [v3.11.0] — 2026-08-26
+
+### Added
+- **90° Clockwise Rotated Dished Head 2D Grid Alignment** — Applied a $90^\circ$ Clockwise rotation transform to both Front and Rear Dished Head 2D Disc Grid Diagrams flanking the unrolled shell plate development. The 12 o'clock joining point of the dished head disc now points horizontally to the Right (directly touching the Tangent Line weld seam $T.L.$), aligning the 2D Cartesian measurement grid ($300\text{mm} \times 300\text{mm}$ square tiles) with standard pressure vessel sheet metal surface development guidelines.
+
+## [v3.10.0] — 2026-08-26
+
+### Added
+- **Grid-Aligned Dished Head 2D Disc Diagrams** — Positioned Front and Rear Head 2D Disc Grid Diagrams directly beside the unrolled shell plate development (flanking the left and right Tangent Lines). The disc diagrams are rotated and scaled so that the 12 o'clock ($0^\circ$) top center aligns with the middle height of the shell rollout strip, allowing dish-end grid lines ($300\text{mm} \times 300\text{mm}$ square tiles) to match shell zone grid lines 1-to-1 horizontally across the Tangent Lines.
+
+### Fixed
+- **Dimension De-Collision** — Re-architected dimension line bands into dedicated non-overlapping horizontal and vertical offsets:
+  - Top Band 1 ($OAL$ overall vessel length in blue)
+  - Top Band 2 ($H_f, H_r$ front and rear crown depth in red)
+  - Left Y-Axis Band ($180^\circ \to 0^\circ \to 180^\circ$ angular degree ticks and `ANGULAR POSITION` title)
+  - Bottom X-Axis Band (Axial distance from T.L. in metres)
+
+## [v3.9.0] — 2026-08-26
+
+### Added
+- **2-Tier Engineering Surface Development Layout** — Restructured `SurfaceRolloutSchematic` into a formal 2-tier pressure vessel fabrication drawing layout (ASME / ISO standard). Top tier contains the unrolled cylindrical shell plate development ($L \times \pi D$) with elevation head profile outlines, Tangent Line ($T.L.$) markers, overall vessel length ($OAL$), and zone pitch grid lines ($P_L, P_T$). Bottom tier contains dedicated Front and Rear Head 2D Flat Pattern Grid sub-panels with scale disc diagrams, exact 2D square tile grids ($300\text{mm} \times 300\text{mm}$), clock ticks (12, 3, 6, 9 o'clock), pitch, and cell count metadata.
+
+### Fixed
+- **Text & Label Overlap Fix** — Increased left axis padding (`leftPad = 80px`) and separated 2D disc diagrams into dedicated sub-panels below the shell rollout, completely resolving text collisions with Y-axis degree ticks ("ANGULAR POSITION", 180° to 180°).
+
+## [v3.8.0] — 2026-08-26
+
+### Added
+- **2D Plan-View Dish-End Grid Diagrams** — Added true 2D plan-view disc grid diagrams for Front and Rear dished heads in `SurfaceRolloutSchematic` and `Rollout2D`. Each dish-end grid cell is rendered in its true flat 2D shape (exact $300\text{mm} \times 300\text{mm}$ square tiles) on the disc plane, complete with clock reference ticks (12, 3, 6, 9 o'clock) and thermal heatmap overlays.
+
+### Fixed
+- **Surface Development Rollout Figure Update** — Updated the Surface Development schematic layout to present a formal 3-part blueprint figure combining the unrolled shell rectangle with zone grid lines ($Cells_L \times Cells_T$) and flanking 2D dish-end grid disc diagrams alongside Tangent Line ($T.L.$) elevation section callouts.
+
+## [v3.7.2] — 2026-08-26
+
+### Fixed
+- **Surface Development & Rollout dished-head geometry fix** — Corrected the dished-head grid transformation in `SurfaceRolloutSchematic` and `Rollout2D` by scaling axial depth `px` relative to the angular dished-head elevation boundary `depthAvail(Y)`. Dish-end grid cells now fit flush inside the dished head elevation curve without spilling into outer margins.
+- **Shell Zone measurement grid lines included** — Added explicit grid line rendering ($Cells_L \times Cells_T$) for all shell zones in the Surface Development drawing, ensuring measurement pitch lines ($P_L, P_T$) are drawn in both thermal and non-thermal modes.
+
 ## [v3.7.1] — 2026-08-26
 
 ### Fixed
-- **Dish-end grids on the Drawing Sheet's surface development no longer fall outside the dish-end outline.** The heads were drawn as elevation "lens" shapes whose horizontal extent varied with *angular position* (the Y axis), while a grid cell's horizontal position is a function of its *radius* — two different variables, so cells inevitably landed outside the outline and read as sitting behind the dish end. (The quadratic outline also only reached half its nominal crown depth, doubling the overshoot.)
-- **Heads are now drawn as a true surface development**: each head unrolls into a band on the same angular Y axis as the shell strip, plotted against meridian arc length measured along the head surface from the tangent line to the crown (Simpson-integrated ellipse-quadrant arc length; flat heads develop 1:1). Cell positions use the band's own scale, so a cell can no longer spill past the outline regardless of clamping. The head grid now reads continuously with the shell's top band across the T.L.
-- Major/minor angular gridlines are continued across the head bands, and the crown (apex) edge is marked, so shell and heads read as one development.
-- **Corrected a dimensioning error**: the top dimension line spanned the full drawn width (shell + heads) but was labelled OAL. Because the head bands are drawn to *developed* arc length rather than axial depth, that line now dimensions T.L.-to-T.L. only; each head carries its own developed-arc dimension plus crown-depth callout, and OAL is shown as a text note marked not-to-scale. Crown-depth callouts are suppressed on flat heads.
-
----
+- **3D Dish-end grid occlusion fix** — `headSurfacePoint()` now scales depth offset `xo` by radial offset factor `off` and applies normal clearance, preventing dish-end grid lines and thermal surfaces from sinking behind or clipping into opaque vessel heads in 3D viewports (Isometric, Left, Right, Centre, Bottom)
+- **Dish-end grid alignment** — `headGridLayout()` now defaults `phaseY` to align grid lines with the top rim of the vessel (`Y = R`), ensuring dish-end grids remain aligned with the top shell grid lines
+- **Surface Development & Rollout enhancement** — `SurfaceRolloutSchematic` and `Rollout2D` now properly unroll and render dished-head elevation sections with continuous cell quad-polygons and thermal heatmap overlays, replacing scattered point markers with full surface development
 
 ## [v3.7.0] — 2026-08-25
 
