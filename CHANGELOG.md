@@ -8,6 +8,41 @@ Format: `[vX.Y.Z] — YYYY-MM-DD`
 
 ---
 
+## [v3.7.1] — 2026-08-26
+
+### Fixed
+- **Dish-end grids on the Drawing Sheet's surface development no longer fall outside the dish-end outline.** The heads were drawn as elevation "lens" shapes whose horizontal extent varied with *angular position* (the Y axis), while a grid cell's horizontal position is a function of its *radius* — two different variables, so cells inevitably landed outside the outline and read as sitting behind the dish end. (The quadratic outline also only reached half its nominal crown depth, doubling the overshoot.)
+- **Heads are now drawn as a true surface development**: each head unrolls into a band on the same angular Y axis as the shell strip, plotted against meridian arc length measured along the head surface from the tangent line to the crown (Simpson-integrated ellipse-quadrant arc length; flat heads develop 1:1). Cell positions use the band's own scale, so a cell can no longer spill past the outline regardless of clamping. The head grid now reads continuously with the shell's top band across the T.L.
+- Major/minor angular gridlines are continued across the head bands, and the crown (apex) edge is marked, so shell and heads read as one development.
+- **Corrected a dimensioning error**: the top dimension line spanned the full drawn width (shell + heads) but was labelled OAL. Because the head bands are drawn to *developed* arc length rather than axial depth, that line now dimensions T.L.-to-T.L. only; each head carries its own developed-arc dimension plus crown-depth callout, and OAL is shown as a text note marked not-to-scale. Crown-depth callouts are suppressed on flat heads.
+
+---
+
+## [v3.7.0] — 2026-08-25
+
+### Added
+- **Configurable dish/head ends** — front and rear vessel heads are now independently configurable:
+  - Shape type per end: Flat, Hemispherical, or Ellipsoidal (with adjustable depth ratio)
+  - Optional thermal measurement grid on each dish surface, independent of the shell's cylindrical zones — modeled as a uniform Cartesian (straight-strip) grid of a single adjustable pitch (default 300mm) draped onto the dome surface, rather than a radial/angular polar grid, so cell size stays consistent instead of converging near the center
+  - Each dish-end grid can be restricted to a clock-position arc (same `ClockSelector` control used by shell zones), covering only part of the disc instead of always the full 360°
+  - New "Dish Ends" sidebar section with a per-end collapsible editor, matching the existing Zone editor pattern
+  - Dish-end grids render as wireframe overlays and, once thermal data is generated, as colored thermal surfaces on the dome geometry; edge cells that only partially overlap the disc are drawn as-is rather than resized to fit exactly
+  - New "Dish End Grids" summary table (cell counts, pitch, arc, thermal min/max/avg/hotspots) shown alongside the existing Measurement Grid Details table
+  - Fixed a latent bug in the Flat head profile that collapsed every ring to the rim radius (degenerate cap geometry); it now varies correctly from rim to center
+  - Export/Import Config extended to persist dish-end shape, grid settings, and thermal data (backwards compatible — older exported files without this field still load with default dish ends)
+- **Drawing Sheet tab (`⛁ Drawing Sheet`)** — exportable, A4-landscape general arrangement sheet:
+  - Three-row layout of orthographic (true parallel projection) viewports: Isometric + Bottom + Isometric (Rear), Right (rear end) / Centre / Left (front end), and a full-width Surface Rollout panel
+  - Isometric view carries arrow-marked zone callouts (leader line + label) pointing at each zone's location on the vessel; a second isometric view shows the opposite end
+  - Right and Left views look end-on at the rear and front dish ends respectively, so independently-configured dish shapes are visible from both ends; Bottom is a true plan view looking straight up the vertical axis
+  - Removed the redundant Top plan view — that space now goes to a full-width Surface Rollout panel, which reuses the existing 2D unwrapped rollout view (with an unrolled length × circumference dimension caption) plus two new small flat plan-view diagrams of the front and rear dish-end grids (drawn to scale with their own arc-restricted Cartesian cells, or a plain circle when a grid isn't enabled on that end)
+  - Toggleable dimension overlay with three levels (Off / Basic / Detailed) — Basic marks overall length, diameter, and each dish end's depth; Detailed adds per-zone axial start/length
+  - Reuses the Measurement Grid Details and Dish End Grids tables on the same sheet
+  - "Export as Image" button rasterizes the sheet to a downloadable PNG (via html2canvas, newly added as a CDN dependency)
+  - Drawing Sheet viewports now render the vessel with near-opaque materials (a new opt-in `printMode`) so the near surface properly occludes the far surface instead of both being visible superimposed — the interactive 3D tab is unaffected and keeps its translucent look
+  - Dish-end grid overlays are now visible even before thermal data is generated (a light tint of the end's identity color) and draw with higher-contrast, slightly offset wireframe lines so they read clearly in small end-on views
+
+---
+
 ## [v3.6.0] — 2026-07-17
 
 ### Added
