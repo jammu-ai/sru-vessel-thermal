@@ -115,7 +115,6 @@ const LS_VER    = "vtm_last_version";
 const LS_CACHE  = "vtm_cached_html";
 const LS_DATE   = "vtm_last_date";
 
-let currentBlobUrl = null;
 
 /* ── DOM refs ── */
 const banner      = document.getElementById("update-banner");
@@ -210,15 +209,15 @@ function loadCache(){
   errorPanel.classList.remove("show");
 }
 
-/* ── Mount HTML into iframe via Blob URL ── */
+/* ── Mount HTML into iframe via srcdoc ──
+   srcdoc keeps the frame same-origin with the launcher (a blob: URL frame is
+   treated as cross-origin when opened from file://), which the browser
+   requires for the app's Save / Export / Import file pickers. */
 function mountHTML(html){
-  if(currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
-  // Apply correct dimensions BEFORE setting src so the app
+  // Apply correct dimensions BEFORE loading so the app
   // measures the right viewport size on first render
   updateLayout();
-  const blob = new Blob([html], {type:"text/html"});
-  currentBlobUrl = URL.createObjectURL(blob);
-  frame.src = currentBlobUrl;
+  frame.srcdoc = html;
 }
 
 /* ── Main launch sequence ── */

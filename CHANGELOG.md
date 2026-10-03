@@ -8,6 +8,12 @@ Format: `[vX.Y.Z] — YYYY-MM-DD`
 
 ---
 
+## [v3.17.1] — 2026-10-03
+
+### Fixed
+- **Save / Export now open the save-location (folder) dialog when run from the launcher** — the launcher mounted the app in a `blob:` URL iframe, which Chrome treats as cross-origin when the launcher is opened from disk, so the file picker was refused. The launcher now mounts the app via `srcdoc` (same-origin).
+- If the browser still refuses the picker (`SecurityError`), Export falls back to a download and Import to the plain file input, with a message explaining how to get Save / auto-save (open the app file directly in Chrome or Edge).
+
 ## [v3.17.0] — 2026-10-03
 
 ### Added
