@@ -8,6 +8,17 @@ Format: `[vX.Y.Z] — YYYY-MM-DD`
 
 ---
 
+## [v3.17.0] — 2026-10-03
+
+### Added
+- **💾 Save button in the top bar** — saves the current configuration to the linked `.json` file (the file last exported or imported). If no file is linked yet, Save opens the Export dialog first.
+- **Auto-save toggle** — when enabled (default), changes are written back to the linked file ~1 s after editing stops; disable it to save only on demand. A status indicator shows Saved / Unsaved changes / Saving… / Save failed plus the linked filename.
+
+### Changed
+- **Export / Import use the File System Access API** (Chrome/Edge) so the chosen file can be written back to. Browsers without the API keep the previous behaviour (download / file input), and Save falls back to downloading a copy.
+- Import/export logic refactored into `buildPayload()` / `applyConfig()`; imports are applied in one batched render.
+- Help tab updated with Save and Auto-save behaviour.
+
 ## [v3.16.0] — 2026-08-26
 
 ### Added
